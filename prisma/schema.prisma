@@ -1,0 +1,211 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                      String              @id @default(uuid())
+  name                    String?
+  email                   String              @unique
+  emailVerified           DateTime?
+  image                   String?
+  locale                  String              @default("he")
+  voicePart               String?             // soprano, mezzo, alto, tenor, baritone, bass
+  role                    String              @default("member") // member, director, admin
+  shabbatMode             Boolean             @default(false)
+  xp                      Int                 @default(0)
+  currentStreak           Int                 @default(0)
+  longestStreak           Int                 @default(0)
+  lastPracticeDate        DateTime?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  // Auth relations
+  accounts                Account[]
+  sessions                Session[]
+
+  // App relations
+  choirMemberships        ChoirMember[]
+  chunkProgress           UserChunkProgress[]
+  practiceSessions        PracticeSession[]
+  assignmentsCreated      Assignment[]        @relation("AssignedBy")
+  achievements            UserAchievement[]
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Choir {
+  id         String   @id @default(uuid())
+  name       String
+  inviteCode String   @unique
+  locale     String   @default("he-IL")
+  weekStart  String   @default("sunday") // sunday or monday
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  members     ChoirMember[]
+  songs       Song[]
+  assignments Assignment[]
+}
+
+model ChoirMember {
+  id        String   @id @default(uuid())
+  userId    String
+  choirId   String
+  role      String   @default("member") // member, director
+  joinedAt  DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  choir Choir @relation(fields: [choirId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, choirId])
+}
+
+model Song {
+  id            String   @id @default(uuid())
+  choirId       String?  // null for personal songs
+  title         String
+  composer      String?
+  lyricist      String?
+  arranger      String?
+  language      String   @default("he") // he, en, mixed, other
+  textDirection String   @default("rtl") // rtl, ltr, auto
+  isMedley      Boolean  @default(false)
+  isPersonal    Boolean  @default(false)
+  personalUserId String? // owner if personal song
+  spotifyTrackId String?
+  spotifyEmbed   String?
+  targetDate    DateTime?
+  concertOrder  Int?
+  tags          String?  // JSON array stored as string
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  choir       Choir?       @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  chunks      Chunk[]
+  audioTracks AudioTrack[]
+  assignments Assignment[]
+}
+
+model Chunk {
+  id            String  @id @default(uuid())
+  songId        String
+  label         String  // e.g., "בית 1", "פזמון", "גשר"
+  chunkType     String  @default("verse") // verse, chorus, bridge, intro, outro, transition, coda, custom
+  order         Int
+  lyrics        String  // Full lyrics text (UTF-8 with nikkud)
+  textDirection String  @default("rtl")
+  audioStartMs  Int?
+  audioEndMs    Int?
+  createdAt     DateTime @default(now())
+
+  song     Song              @relation(fields: [songId], references: [id], onDelete: Cascade)
+  progress UserChunkProgress[]
+}
+
+model AudioTrack {
+  id         String   @id @default(uuid())
+  songId     String
+  voicePart  String   @default("full") // full, soprano, mezzo, alto, tenor, baritone, bass
+  fileUrl    String
+  durationMs Int?
+  uploadedAt DateTime @default(now())
+
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+}
+
+model UserChunkProgress {
+  id              String    @id @default(uuid())
+  userId          String
+  chunkId         String
+  fadeLevel       Int       @default(0) // 0-5
+  memoryStrength  Float     @default(0.0) // 0.0-1.0
+  easeFactor      Float     @default(2.5)
+  intervalDays    Float     @default(1.0)
+  nextReviewAt    DateTime  @default(now())
+  reviewCount     Int       @default(0)
+  lastReviewedAt  DateTime?
+  elaborationNotes String?
+  status          String    @default("fragile") // fragile, shaky, developing, solid, locked_in
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chunk Chunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chunkId])
+}
+
+model PracticeSession {
+  id              String   @id @default(uuid())
+  userId          String
+  mode            String   @default("guided") // guided, free, interleaved, performance_sim, speed_round
+  startedAt       DateTime @default(now())
+  endedAt         DateTime?
+  chunksPracticed String?  // JSON array [{chunkId, fadeLevel, selfRating}]
+  durationSeconds Int?
+  xpEarned        Int      @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Assignment {
+  id          String   @id @default(uuid())
+  songId      String
+  choirId     String
+  voiceParts  String?  // JSON array of voice parts, null = all
+  targetDate  DateTime?
+  priority    String   @default("normal") // normal, high, urgent
+  assignedAt  DateTime @default(now())
+  assignedById String
+
+  song       Song  @relation(fields: [songId], references: [id], onDelete: Cascade)
+  choir      Choir @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  assignedBy User  @relation("AssignedBy", fields: [assignedById], references: [id])
+}
+
+model UserAchievement {
+  id          String   @id @default(uuid())
+  userId      String
+  achievement String   // achievement key
+  unlockedAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievement])
+}

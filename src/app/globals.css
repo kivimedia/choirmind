@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #faf9f7;
+  --color-foreground: #1a1a2e;
+  --color-primary: #6c5ce7;
+  --color-primary-light: #a29bfe;
+  --color-primary-dark: #4a3db5;
+  --color-secondary: #00b894;
+  --color-accent: #fd79a8;
+  --color-warning: #fdcb6e;
+  --color-danger: #e17055;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f5f4f2;
+  --color-border: #e2e0dc;
+  --color-text-muted: #7f8c8d;
+
+  /* Memory status colors */
+  --color-status-fragile: #e74c3c;
+  --color-status-shaky: #e67e22;
+  --color-status-developing: #f1c40f;
+  --color-status-solid: #27ae60;
+  --color-status-locked: #f39c12;
+
+  --font-family-heebo: 'Heebo', 'Rubik', 'Assistant', system-ui, -apple-system, sans-serif;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-family-heebo);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    line-height: 1.6;
+    font-size: 16px;
+  }
+
+  /* Hebrew lyrics need extra line height for nikkud */
+  .lyrics-display {
+    line-height: 1.8;
+    font-feature-settings: "mark";
+  }
+}
+
+/* Fade Out animation */
+.word-fade-out {
+  transition: opacity 0.5s ease-in-out, filter 0.5s ease-in-out;
+}
+
+.word-hidden {
+  opacity: 0;
+  filter: blur(4px);
+}
+
+.word-placeholder {
+  display: inline-block;
+  border-bottom: 2px dashed var(--color-border);
+  min-width: 2ch;
+}
+
+/* RTL-specific progress bar */
+.progress-bar-rtl {
+  direction: rtl;
+  transform-origin: right center;
+}
+
+/* Smooth scroll for practice sessions */
+.practice-scroll {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
