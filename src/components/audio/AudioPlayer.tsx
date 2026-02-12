@@ -106,7 +106,7 @@ export default function AudioPlayer({
         />
 
         {/* Player controls */}
-        <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2">
+        <div dir="ltr" className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2">
           {/* Skip back 3s */}
           <button
             type="button"
@@ -162,10 +162,7 @@ export default function AudioPlayer({
             >
               <div
                 className="absolute inset-y-0 rounded-full bg-primary transition-[width] duration-100"
-                style={locale === 'he'
-                  ? { right: 0, width: `${progress}%` }
-                  : { left: 0, width: `${progress}%` }
-                }
+                style={{ left: 0, width: `${progress}%` }}
               />
             </div>
             <div className="flex justify-between text-[10px] text-text-muted tabular-nums">
