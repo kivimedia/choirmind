@@ -375,19 +375,7 @@ export default function GamesPage() {
           />
         </div>
 
-        {/* Karaoke display — only for fill-the-blank (word-scramble and finish-the-line test recall) */}
-        {selectedChunk.lineTimestamps && activeGame === 'fill-the-blank' && (
-          <div className="mb-4 rounded-xl border border-border bg-surface p-4 overflow-y-auto max-h-48">
-            <KaraokeDisplay
-              lyrics={selectedChunk.lyrics}
-              fadeLevel={0}
-              timestamps={selectedChunk.lineTimestamps}
-              currentTimeMs={currentTimeMs}
-            />
-          </div>
-        )}
-
-        {/* Render game */}
+        {/* Render game — no lyrics display; games test recall from memory */}
         {activeGame === 'word-scramble' && (
           <WordScramble
             lyrics={selectedChunk.lyrics}

@@ -266,6 +266,7 @@ export default function PracticeSessionPage() {
       } else {
         setCurrentChunkIndex(nextIndex)
         setCurrentTimeMs(0)
+        setManualSeekMs(null)
         setManualFadeOverride(null) // reset manual override on chunk change
         // Use the next chunk's stored fade level, or the computed next level
         const nextChunkFade = song?.chunks[nextIndex]?.fadeLevel ?? nextFade
@@ -284,15 +285,11 @@ export default function PracticeSessionPage() {
       if (e.key === 'ArrowRight') {
         e.preventDefault()
         // In RTL context: right arrow = back 3s
-        const target = Math.max(0, currentTimeMs - 3000)
-        setManualSeekMs(target)
-        setTimeout(() => setManualSeekMs(null), 100)
+        setManualSeekMs(Math.max(0, currentTimeMs - 3000))
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
         // In RTL context: left arrow = forward 3s
-        const target = currentTimeMs + 3000
-        setManualSeekMs(target)
-        setTimeout(() => setManualSeekMs(null), 100)
+        setManualSeekMs(currentTimeMs + 3000)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -302,8 +299,6 @@ export default function PracticeSessionPage() {
   // Handle click on lyrics line to seek
   const handleLineSeek = useCallback((timestampMs: number) => {
     setManualSeekMs(timestampMs)
-    // Reset after a tick so the same timestamp can be re-clicked
-    setTimeout(() => setManualSeekMs(null), 100)
   }, [])
 
   // Word reveal handler
@@ -381,6 +376,7 @@ export default function PracticeSessionPage() {
               const prevIdx = currentChunkIndex - 1
               setCurrentChunkIndex(prevIdx)
               setCurrentTimeMs(0)
+              setManualSeekMs(null)
               setManualFadeOverride(null)
               setCurrentFadeLevel(song.chunks[prevIdx]?.fadeLevel ?? 0)
             }}
@@ -401,6 +397,7 @@ export default function PracticeSessionPage() {
               const nextIdx = currentChunkIndex + 1
               setCurrentChunkIndex(nextIdx)
               setCurrentTimeMs(0)
+              setManualSeekMs(null)
               setManualFadeOverride(null)
               setCurrentFadeLevel(song.chunks[nextIdx]?.fadeLevel ?? 0)
             }}

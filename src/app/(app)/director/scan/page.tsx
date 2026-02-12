@@ -42,11 +42,22 @@ export default function ScanPage() {
   const [songs, setSongs] = useState<ScannedSong[]>([])
   const [source, setSource] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [existingTitles, setExistingTitles] = useState<Set<string>>(new Set())
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState({ done: 0, total: 0, errors: 0 })
   const [importDone, setImportDone] = useState(false)
 
   const isDirector = session?.user?.role === 'director' || session?.user?.role === 'admin'
+
+  // Helper: normalise a title for dedup comparison (lowercase + trim)
+  function normalizeTitle(t: string) {
+    return t.trim().toLowerCase()
+  }
+
+  // Check whether a scanned song already exists in the choir
+  function isSongExisting(song: ScannedSong) {
+    return existingTitles.has(normalizeTitle(song.title))
+  }
 
   // ── Scan ──────────────────────────────────────────────────────────────
 
@@ -56,23 +67,45 @@ export default function ScanPage() {
     setScanError(null)
     setSongs([])
     setSelected(new Set())
+    setExistingTitles(new Set())
     setImportDone(false)
 
     try {
-      const res = await fetch('/api/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim(), choirId: activeChoirId }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setScanError(data.error || 'Failed to scan')
+      // Fetch scanned songs and existing choir songs in parallel
+      const [scanRes, existingRes] = await Promise.all([
+        fetch('/api/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: url.trim(), choirId: activeChoirId }),
+        }),
+        fetch(`/api/songs?choirId=${activeChoirId}`),
+      ])
+
+      const scanData = await scanRes.json()
+      if (!scanRes.ok) {
+        setScanError(scanData.error || 'Failed to scan')
         return
       }
-      setSongs(data.songs || [])
-      setSource(data.source || null)
-      // Auto-select all
-      setSelected(new Set((data.songs || []).map((_: ScannedSong, i: number) => i)))
+
+      // Build a set of normalised existing song titles
+      let existingSet = new Set<string>()
+      if (existingRes.ok) {
+        const existingData = await existingRes.json()
+        const existingSongs: { title: string }[] = existingData.songs || []
+        existingSet = new Set(existingSongs.map((s) => normalizeTitle(s.title)))
+      }
+      setExistingTitles(existingSet)
+
+      const scannedSongs: ScannedSong[] = scanData.songs || []
+      setSongs(scannedSongs)
+      setSource(scanData.source || null)
+
+      // Auto-select only NEW songs (not already in choir)
+      const newIndices = scannedSongs
+        .map((s, i) => ({ s, i }))
+        .filter(({ s }) => !existingSet.has(normalizeTitle(s.title)))
+        .map(({ i }) => i)
+      setSelected(new Set(newIndices))
     } catch {
       setScanError('Network error')
     } finally {
@@ -83,6 +116,8 @@ export default function ScanPage() {
   // ── Toggle selection ──────────────────────────────────────────────────
 
   function toggleSong(index: number) {
+    // Prevent toggling already-imported songs
+    if (isSongExisting(songs[index])) return
     setSelected((prev) => {
       const next = new Set(prev)
       if (next.has(index)) next.delete(index)
@@ -91,11 +126,19 @@ export default function ScanPage() {
     })
   }
 
+  // Count of selectable (new) songs
+  const newSongIndices = songs
+    .map((s, i) => ({ s, i }))
+    .filter(({ s }) => !isSongExisting(s))
+    .map(({ i }) => i)
+
   function toggleAll() {
-    if (selected.size === songs.length) {
+    // Only toggle new (non-existing) songs
+    const allNewSelected = newSongIndices.every((i) => selected.has(i))
+    if (allNewSelected) {
       setSelected(new Set())
     } else {
-      setSelected(new Set(songs.map((_, i) => i)))
+      setSelected(new Set(newSongIndices))
     }
   }
 
@@ -262,15 +305,22 @@ export default function ScanPage() {
               {source && (
                 <Badge variant="primary">{source === 'wix' ? 'Wix' : 'כללי'}</Badge>
               )}
+              {songs.length - newSongIndices.length > 0 && (
+                <Badge variant="default">
+                  {songs.length - newSongIndices.length} כבר קיימים
+                </Badge>
+              )}
             </div>
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={toggleAll}
-                className="text-sm text-primary hover:underline"
-              >
-                {selected.size === songs.length ? 'בטל הכל' : 'בחר הכל'}
-              </button>
+              {newSongIndices.length > 0 && (
+                <button
+                  type="button"
+                  onClick={toggleAll}
+                  className="text-sm text-primary hover:underline"
+                >
+                  {newSongIndices.every((i) => selected.has(i)) ? 'בטל הכל' : 'בחר הכל'}
+                </button>
+              )}
               <Badge variant="default">
                 {selected.size} נבחרו
               </Badge>
@@ -279,54 +329,72 @@ export default function ScanPage() {
 
           {/* Song list */}
           <div className="space-y-2">
-            {songs.map((song, i) => (
-              <Card
-                key={i}
-                className={[
-                  '!p-4 cursor-pointer transition-colors',
-                  selected.has(i) ? 'ring-2 ring-primary/40' : '',
-                ].join(' ')}
-              >
-                <div className="flex items-start gap-3" onClick={() => toggleSong(i)}>
-                  {/* Checkbox */}
-                  <div className="mt-0.5 shrink-0">
-                    <div
-                      className={[
-                        'flex h-5 w-5 items-center justify-center rounded border-2 transition-colors',
-                        selected.has(i)
-                          ? 'border-primary bg-primary text-white'
-                          : 'border-border bg-surface',
-                      ].join(' ')}
-                    >
-                      {selected.has(i) && (
-                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
+            {songs.map((song, i) => {
+              const existing = isSongExisting(song)
+              return (
+                <Card
+                  key={i}
+                  className={[
+                    '!p-4 transition-colors',
+                    existing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+                    !existing && selected.has(i) ? 'ring-2 ring-primary/40' : '',
+                  ].join(' ')}
+                >
+                  <div className="flex items-start gap-3" onClick={() => toggleSong(i)}>
+                    {/* Checkbox */}
+                    <div className="mt-0.5 shrink-0">
+                      <div
+                        className={[
+                          'flex h-5 w-5 items-center justify-center rounded border-2 transition-colors',
+                          existing
+                            ? 'border-border bg-surface-hover cursor-not-allowed'
+                            : selected.has(i)
+                              ? 'border-primary bg-primary text-white'
+                              : 'border-border bg-surface',
+                        ].join(' ')}
+                      >
+                        {!existing && selected.has(i) && (
+                          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Song info */}
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium text-foreground">{song.title}</p>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-muted">
-                      {song.composer && <span>לחן: {song.composer}</span>}
-                      {song.lyricist && <span>מילים: {song.lyricist}</span>}
-                      {song.arranger && <span>עיבוד: {song.arranger}</span>}
-                    </div>
-                    {/* Audio parts */}
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {song.audioFiles.map((af, j) => (
-                        <Badge key={j} variant="default">
-                          {af.voicePart}
-                          {af.durationMs ? ` (${Math.round(af.durationMs / 1000)}s)` : ''}
-                        </Badge>
-                      ))}
+                    {/* Song info */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className={[
+                          'font-medium',
+                          existing ? 'text-text-muted line-through' : 'text-foreground',
+                        ].join(' ')}>
+                          {song.title}
+                        </p>
+                        {existing && (
+                          <Badge variant="default" className="!bg-surface-hover !text-text-muted text-xs">
+                            כבר קיים
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+                        {song.composer && <span>לחן: {song.composer}</span>}
+                        {song.lyricist && <span>מילים: {song.lyricist}</span>}
+                        {song.arranger && <span>עיבוד: {song.arranger}</span>}
+                      </div>
+                      {/* Audio parts */}
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {song.audioFiles.map((af, j) => (
+                          <Badge key={j} variant="default">
+                            {af.voicePart}
+                            {af.durationMs ? ` (${Math.round(af.durationMs / 1000)}s)` : ''}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              </Card>
-            ))}
+                </Card>
+              )
+            })}
           </div>
 
           {/* Import button */}

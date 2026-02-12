@@ -736,7 +736,7 @@ export default function EditSongPage() {
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-foreground">קטעי השיר ({chunks.length})</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {audioTracks.length > 0 && chunks.some((c) => c.lyrics.trim()) && (
               <Button
                 variant="primary"
@@ -759,6 +759,13 @@ export default function EditSongPage() {
               onClick={() => { setLyricsSearchOpen(true); handleLyricsSearch() }}
             >
               חיפוש מילים
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPasteModalOpen(true)}
+            >
+              הדבקה חכמה
             </Button>
           </div>
         </div>
