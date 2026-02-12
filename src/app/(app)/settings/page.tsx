@@ -89,6 +89,16 @@ export default function SettingsPage() {
         )}
       </Card>
 
+      {/* Version info */}
+      <div className="text-center text-xs text-text-muted">
+        <span>ChoirMind v{process.env.NEXT_PUBLIC_BUILD_VERSION || 'dev'}</span>
+        {process.env.NEXT_PUBLIC_BUILD_TIME && (
+          <span className="ms-2">
+            ({new Date(process.env.NEXT_PUBLIC_BUILD_TIME).toLocaleDateString('he-IL')})
+          </span>
+        )}
+      </div>
+
       {/* Join choir */}
       <Card className="!p-6">
         <h2 className="text-lg font-semibold text-foreground mb-4">הצטרפות למקהלה</h2>

@@ -277,38 +277,27 @@ export default function PracticeSessionPage() {
     [currentChunk, currentChunkIndex, currentFadeLevel, isSubmitting, song, songId, sessionChunks],
   )
 
-  // Keyboard navigation (arrow keys to switch chunks)
+  // Keyboard navigation: arrow keys seek audio ±3s
   useEffect(() => {
     if (!song || isComplete) return
     function handleKeyDown(e: KeyboardEvent) {
-      // In RTL: ArrowRight = previous, ArrowLeft = next
       if (e.key === 'ArrowRight') {
         e.preventDefault()
-        setCurrentChunkIndex((prev) => {
-          const next = prev - 1
-          if (next < 0) return prev
-          setCurrentTimeMs(0)
-          setManualFadeOverride(null)
-          setManualSeekMs(null)
-          setCurrentFadeLevel(song!.chunks[next]?.fadeLevel ?? 0)
-          return next
-        })
+        // In RTL context: right arrow = back 3s
+        const target = Math.max(0, currentTimeMs - 3000)
+        setManualSeekMs(target)
+        setTimeout(() => setManualSeekMs(null), 100)
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
-        setCurrentChunkIndex((prev) => {
-          const next = prev + 1
-          if (next >= (song?.chunks.length ?? 0)) return prev
-          setCurrentTimeMs(0)
-          setManualFadeOverride(null)
-          setManualSeekMs(null)
-          setCurrentFadeLevel(song!.chunks[next]?.fadeLevel ?? 0)
-          return next
-        })
+        // In RTL context: left arrow = forward 3s
+        const target = currentTimeMs + 3000
+        setManualSeekMs(target)
+        setTimeout(() => setManualSeekMs(null), 100)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [song, isComplete])
+  }, [song, isComplete, currentTimeMs])
 
   // Handle click on lyrics line to seek
   const handleLineSeek = useCallback((timestampMs: number) => {

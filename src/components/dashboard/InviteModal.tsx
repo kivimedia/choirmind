@@ -13,14 +13,18 @@ interface InviteModalProps {
 export default function InviteModal({ isOpen, onClose, inviteCode }: InviteModalProps) {
   const [copied, setCopied] = useState(false)
 
-  const handleCopy = useCallback(async () => {
+  const inviteLink = typeof window !== 'undefined'
+    ? `${window.location.origin}/join/${inviteCode}`
+    : `/join/${inviteCode}`
+
+  const handleCopyLink = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(inviteCode)
+      await navigator.clipboard.writeText(inviteLink)
       setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      setTimeout(() => setCopied(false), 2500)
     } catch {
       // Fallback: select text for manual copy
-      const el = document.getElementById('invite-code-display')
+      const el = document.getElementById('invite-link-display')
       if (el) {
         const range = document.createRange()
         range.selectNodeContents(el)
@@ -29,45 +33,47 @@ export default function InviteModal({ isOpen, onClose, inviteCode }: InviteModal
         sel?.addRange(range)
       }
     }
-  }, [inviteCode])
+  }, [inviteLink])
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={'\u05D4\u05D6\u05DE\u05E0\u05EA \u05D7\u05D1\u05E8\u05D9\u05DD'}
+      title="הזמנת חברים"
     >
       <div className="space-y-5 text-center">
         <p className="text-sm text-text-muted">
-          {'\u05E9\u05EA\u05E4\u05D5 \u05D0\u05EA \u05D4\u05E7\u05D5\u05D3 \u05D4\u05D6\u05D4 \u05E2\u05DD \u05D7\u05D1\u05E8\u05D9 \u05D4\u05DE\u05E7\u05D4\u05DC\u05D4'}
+          שלחו את הקישור הזה לחברי המקהלה — הם יתחברו ויצטרפו אוטומטית
         </p>
 
-        {/* Large invite code display */}
-        <div className="rounded-xl border-2 border-dashed border-primary/40 bg-primary/5 px-6 py-5">
+        {/* Link display */}
+        <div className="rounded-xl border-2 border-dashed border-primary/40 bg-primary/5 px-4 py-4">
           <p
-            id="invite-code-display"
-            className="text-3xl font-bold tracking-[0.3em] text-primary select-all"
+            id="invite-link-display"
+            className="text-sm font-medium text-primary select-all break-all"
             dir="ltr"
           >
-            {inviteCode}
+            {inviteLink}
           </p>
         </div>
 
-        {/* Copy button */}
+        {/* Copy link button */}
         <Button
           variant={copied ? 'secondary' : 'primary'}
           size="md"
-          onClick={handleCopy}
+          onClick={handleCopyLink}
           className="w-full"
         >
-          {copied
-            ? '\u2713 \u05D4\u05D5\u05E2\u05EA\u05E7!'
-            : '\u05D4\u05E2\u05EA\u05E7 \u05E7\u05D5\u05D3'}
+          {copied ? '\u2713 הקישור הועתק!' : 'העתק קישור הזמנה'}
         </Button>
 
-        <p className="text-xs text-text-muted">
-          {'\u05D4\u05D7\u05D1\u05E8\u05D9\u05DD \u05D9\u05D5\u05DB\u05DC\u05D5 \u05DC\u05D4\u05E9\u05EA\u05DE\u05E9 \u05D1\u05E7\u05D5\u05D3 \u05D6\u05D4 \u05DB\u05D3\u05D9 \u05DC\u05D4\u05E6\u05D8\u05E8\u05E3 \u05DC\u05DE\u05E7\u05D4\u05DC\u05D4'}
-        </p>
+        {/* Code fallback note */}
+        <div className="rounded-lg bg-surface-hover px-4 py-3">
+          <p className="text-xs text-text-muted mb-1">קוד הצטרפות ידני:</p>
+          <p className="text-lg font-bold tracking-[0.2em] text-foreground" dir="ltr">
+            {inviteCode}
+          </p>
+        </div>
       </div>
     </Modal>
   )
