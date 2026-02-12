@@ -86,6 +86,9 @@ export default function PracticeSessionPage() {
   // Karaoke time tracking
   const [currentTimeMs, setCurrentTimeMs] = useState(0)
 
+  // Manual seek (e.g. from clicking a lyric line)
+  const [manualSeekMs, setManualSeekMs] = useState<number | null>(null)
+
   // Toggles
   const [showFullLyrics, setShowFullLyrics] = useState(false)
 
@@ -274,6 +277,46 @@ export default function PracticeSessionPage() {
     [currentChunk, currentChunkIndex, currentFadeLevel, isSubmitting, song, songId, sessionChunks],
   )
 
+  // Keyboard navigation (arrow keys to switch chunks)
+  useEffect(() => {
+    if (!song || isComplete) return
+    function handleKeyDown(e: KeyboardEvent) {
+      // In RTL: ArrowRight = previous, ArrowLeft = next
+      if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        setCurrentChunkIndex((prev) => {
+          const next = prev - 1
+          if (next < 0) return prev
+          setCurrentTimeMs(0)
+          setManualFadeOverride(null)
+          setManualSeekMs(null)
+          setCurrentFadeLevel(song!.chunks[next]?.fadeLevel ?? 0)
+          return next
+        })
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        setCurrentChunkIndex((prev) => {
+          const next = prev + 1
+          if (next >= (song?.chunks.length ?? 0)) return prev
+          setCurrentTimeMs(0)
+          setManualFadeOverride(null)
+          setManualSeekMs(null)
+          setCurrentFadeLevel(song!.chunks[next]?.fadeLevel ?? 0)
+          return next
+        })
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [song, isComplete])
+
+  // Handle click on lyrics line to seek
+  const handleLineSeek = useCallback((timestampMs: number) => {
+    setManualSeekMs(timestampMs)
+    // Reset after a tick so the same timestamp can be re-clicked
+    setTimeout(() => setManualSeekMs(null), 100)
+  }, [])
+
   // Word reveal handler
   const handleWordReveal = useCallback((index: number) => {
     // Could track reveals for analytics; no-op for now
@@ -448,7 +491,7 @@ export default function PracticeSessionPage() {
           youtubeVideoId={song.youtubeVideoId}
           spotifyTrackId={song.spotifyTrackId}
           onTimeUpdate={setCurrentTimeMs}
-          seekToMs={seekTarget}
+          seekToMs={manualSeekMs ?? seekTarget}
         />
       </div>
 
@@ -462,6 +505,7 @@ export default function PracticeSessionPage() {
               timestamps={currentChunk.lineTimestamps}
               currentTimeMs={currentTimeMs}
               onWordReveal={handleWordReveal}
+              onLineClick={handleLineSeek}
             />
           ) : (
             <FadeOutDisplay

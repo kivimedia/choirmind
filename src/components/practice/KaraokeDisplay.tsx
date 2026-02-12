@@ -28,6 +28,8 @@ interface KaraokeDisplayProps {
   latencyOffsetMs?: number
   /** Called when a user taps a placeholder to reveal the word. */
   onWordReveal?: (index: number) => void
+  /** Called when a user clicks a lyrics line to seek playback there. */
+  onLineClick?: (timestampMs: number) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +82,7 @@ export default function KaraokeDisplay({
   currentTimeMs,
   latencyOffsetMs = DEFAULT_LATENCY_OFFSET_MS,
   onWordReveal,
+  onLineClick,
 }: KaraokeDisplayProps) {
   const [revealedIndices, setRevealedIndices] = useState<Set<number>>(new Set())
   const containerRef = useRef<HTMLDivElement>(null)
@@ -178,6 +181,26 @@ export default function KaraokeDisplay({
     return set
   }, [activeNonEmptyIdx, nonEmptyLineMap])
 
+  // Map raw line index → non-empty line index (for click-to-seek)
+  const rawToNonEmptyMap = useMemo(() => {
+    const map = new Map<number, number>()
+    for (let i = 0; i < nonEmptyLineMap.length; i++) {
+      map.set(nonEmptyLineMap[i], i)
+    }
+    return map
+  }, [nonEmptyLineMap])
+
+  const handleLineClick = useCallback(
+    (rawLineIdx: number) => {
+      if (!onLineClick) return
+      const nonEmptyIdx = rawToNonEmptyMap.get(rawLineIdx)
+      if (nonEmptyIdx !== undefined && nonEmptyIdx < timestamps.length) {
+        onLineClick(timestamps[nonEmptyIdx])
+      }
+    },
+    [onLineClick, rawToNonEmptyMap, timestamps],
+  )
+
   return (
     <div
       ref={containerRef}
@@ -196,7 +219,9 @@ export default function KaraokeDisplay({
               'mb-2 min-h-[1.8em] rounded-lg px-2 transition-all duration-300',
               isActive ? 'bg-primary/10' : '',
               isPast ? 'opacity-50' : '',
+              onLineClick && lineWords.length > 0 ? 'cursor-pointer hover:bg-primary/5' : '',
             ].join(' ')}
+            onClick={() => handleLineClick(lineIdx)}
           >
             {lineWords.length === 0 ? (
               <span>&nbsp;</span>

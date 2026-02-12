@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
+import Link from 'next/link'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
@@ -303,6 +304,11 @@ export default function DirectorPage() {
           )}
         </div>
         <div className="flex gap-2">
+          <Link href="/director/scan">
+            <Button variant="outline" size="sm">
+              סריקת שירים
+            </Button>
+          </Link>
           <Button
             variant="outline"
             size="sm"
