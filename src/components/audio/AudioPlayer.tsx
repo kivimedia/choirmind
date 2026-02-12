@@ -84,13 +84,8 @@ export default function AudioPlayer({
       const bar = progressBarRef.current
       if (!bar || engine.durationMs === 0) return
       const rect = bar.getBoundingClientRect()
-      // Handle RTL: if locale is Hebrew, progress goes right-to-left
-      let ratio: number
-      if (locale === 'he') {
-        ratio = 1 - (e.clientX - rect.left) / rect.width
-      } else {
-        ratio = (e.clientX - rect.left) / rect.width
-      }
+      // Controls container uses dir="ltr", so progress always goes left-to-right
+      const ratio = (e.clientX - rect.left) / rect.width
       const targetMs = Math.max(0, Math.min(engine.durationMs, ratio * engine.durationMs))
       engine.seekTo(targetMs)
     }
