@@ -120,6 +120,8 @@ export default function ProfilePage() {
           options={VOICE_PARTS}
         />
 
+        <div className="pt-2" />
+
         <Button
           variant="primary"
           className="w-full"
