@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { invalidateSongsCache } from '@/lib/songs-cache'
 
 // PUT /api/songs/[songId]/chunks/[chunkId]/timestamps — save line timestamps for a chunk
 export async function PUT(
@@ -69,6 +70,7 @@ export async function PUT(
       chunkId
     )
 
+    invalidateSongsCache()
     return NextResponse.json({ success: true, timestamps })
   } catch (error) {
     console.error('PUT /api/songs/[songId]/chunks/[chunkId]/timestamps error:', error)

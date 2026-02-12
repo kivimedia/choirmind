@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { getCachedSongs, invalidateSongsCache } from '@/lib/songs-cache'
 
 // GET /api/songs — list songs for user's choir + personal songs
 export async function GET(request: NextRequest) {
@@ -34,40 +35,10 @@ export async function GET(request: NextRequest) {
     // Optional choir filter
     const filterChoirId = request.nextUrl.searchParams.get('choirId')
 
-    // Build the OR conditions for song query
-    const orConditions: Record<string, unknown>[] = []
-    if (filterChoirId) {
-      // Only show songs from the specified choir (must be a member)
-      if (choirIds.includes(filterChoirId)) {
-        orConditions.push({ choirId: filterChoirId })
-      }
-      // Always include personal songs
-      orConditions.push({ isPersonal: true, personalUserId: userId })
-    } else {
-      // Show all choirs the user belongs to
-      orConditions.push({ choirId: { in: choirIds } })
-      orConditions.push({ isPersonal: true, personalUserId: userId })
-    }
-
-    // Fetch songs + favorites in parallel
+    // Fetch cached songs + live favorites in parallel
     t = Date.now()
-    const [songs, allFavorites] = await Promise.all([
-      prisma.song.findMany({
-        where: {
-          OR: orConditions,
-          archivedAt: showArchived ? { not: null } : null,
-        },
-        include: {
-          chunks: {
-            orderBy: { order: 'asc' },
-            select: { id: true, lyrics: true, lineTimestamps: true },
-          },
-          audioTracks: {
-            select: { id: true, voicePart: true },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-      }),
+    const [cachedSongs, allFavorites] = await Promise.all([
+      getCachedSongs(choirIds, filterChoirId, userId, showArchived),
       prisma.userFavoriteSong.findMany({
         where: { userId },
         select: { songId: true },
@@ -77,22 +48,10 @@ export async function GET(request: NextRequest) {
 
     const favSet = new Set(allFavorites.map((f) => f.songId))
 
-    // Build slim response — compute summary fields, exclude full lyrics
-    const songsResponse = songs.map((song) => ({
-      id: song.id,
-      title: song.title,
-      composer: song.composer,
-      lyricist: song.lyricist,
-      language: song.language,
-      youtubeVideoId: song.youtubeVideoId,
-      spotifyTrackId: song.spotifyTrackId,
-      createdAt: song.createdAt,
+    // Merge live favorites into cached song data
+    const songsResponse = cachedSongs.map((song) => ({
+      ...song,
       isFavorited: favSet.has(song.id),
-      audioTracks: song.audioTracks,
-      chunkCount: song.chunks.length,
-      hasLyrics: song.chunks.some((c) => c.lyrics?.trim()),
-      allSynced: song.chunks.length > 0 && song.chunks.every((c) => c.lineTimestamps),
-      hasUnsynced: song.chunks.some((c) => c.lyrics?.trim() && !c.lineTimestamps),
     }))
 
     timings.total = Date.now() - t0
@@ -210,6 +169,7 @@ export async function POST(request: NextRequest) {
       })
     })
 
+    invalidateSongsCache()
     return NextResponse.json({ song }, { status: 201 })
   } catch (error) {
     console.error('POST /api/songs error:', error)

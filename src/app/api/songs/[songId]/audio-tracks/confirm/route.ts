@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { s3, S3_BUCKET } from '@/lib/s3'
 import { HeadObjectCommand } from '@aws-sdk/client-s3'
+import { invalidateSongsCache } from '@/lib/songs-cache'
 
 // POST /api/songs/[songId]/audio-tracks/confirm
 // Body: { key, voicePart, durationMs? }
@@ -44,7 +45,7 @@ export async function POST(
       await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: key }))
     } catch {
       return NextResponse.json(
-        { error: 'S3 object not found — upload may have failed' },
+        { error: 'S3 object not found - upload may have failed' },
         { status: 404 },
       )
     }
@@ -63,6 +64,7 @@ export async function POST(
       },
     })
 
+    invalidateSongsCache()
     return NextResponse.json({ audioTrack })
   } catch (error) {
     console.error('[confirm POST]', error)

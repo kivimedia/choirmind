@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { invalidateSongsCache } from '@/lib/songs-cache'
 
 // POST /api/songs/bulk-archive — bulk archive or unarchive songs
 export async function POST(request: NextRequest) {
@@ -71,6 +72,7 @@ export async function POST(request: NextRequest) {
       return updated.count
     })
 
+    invalidateSongsCache()
     return NextResponse.json({ updated: result, songIds: allowedSongIds })
   } catch (error) {
     console.error('POST /api/songs/bulk-archive error:', error)

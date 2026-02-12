@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { invalidateSongsCache } from '@/lib/songs-cache'
 
 // GET /api/songs/[songId] — get single song with chunks
 export async function GET(
@@ -157,6 +158,7 @@ export async function PUT(
       },
     })
 
+    invalidateSongsCache()
     return NextResponse.json({ song })
   } catch (error) {
     console.error('PUT /api/songs/[songId] error:', error)
@@ -221,6 +223,7 @@ export async function PATCH(
       },
     })
 
+    invalidateSongsCache()
     return NextResponse.json({ song, archived: action === 'archive' })
   } catch (error) {
     console.error('PATCH /api/songs/[songId] error:', error)
@@ -282,6 +285,7 @@ export async function DELETE(
 
     await prisma.song.delete({ where: { id: songId } })
 
+    invalidateSongsCache()
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('DELETE /api/songs/[songId] error:', error)

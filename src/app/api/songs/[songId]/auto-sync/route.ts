@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { alignLyricsToTranscript } from '@/lib/lyrics-align'
 import OpenAI from 'openai'
+import { invalidateSongsCache } from '@/lib/songs-cache'
 
 // POST /api/songs/[songId]/auto-sync — AI-powered lyrics sync using Whisper
 export async function POST(
@@ -141,6 +142,7 @@ export async function POST(
 
     console.log(`[auto-sync] Saved timestamps for ${alignResults.length} chunks`)
 
+    invalidateSongsCache()
     return NextResponse.json({
       results: alignResults,
       transcription,

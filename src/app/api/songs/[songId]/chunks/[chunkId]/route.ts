@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { invalidateSongsCache } from '@/lib/songs-cache'
 
 // DELETE /api/songs/[songId]/chunks/[chunkId] — delete a single chunk
 export async function DELETE(
@@ -52,6 +53,7 @@ export async function DELETE(
 
     await prisma.chunk.delete({ where: { id: chunkId } })
 
+    invalidateSongsCache()
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('DELETE /api/songs/[songId]/chunks/[chunkId] error:', error)

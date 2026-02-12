@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { s3, S3_BUCKET } from '@/lib/s3'
 import { DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { invalidateSongsCache } from '@/lib/songs-cache'
 
 // GET /api/songs/[songId]/audio-tracks — list audio tracks for a song
 export async function GET(
@@ -72,6 +73,7 @@ export async function DELETE(
     // Delete from DB
     await prisma.audioTrack.delete({ where: { id: trackId } })
 
+    invalidateSongsCache()
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('[audio-tracks DELETE]', error)

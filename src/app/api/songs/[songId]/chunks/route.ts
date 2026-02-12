@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { invalidateSongsCache } from '@/lib/songs-cache'
 
 // POST /api/songs/[songId]/chunks — add chunk to song
 export async function POST(
@@ -69,6 +70,7 @@ export async function POST(
       },
     })
 
+    invalidateSongsCache()
     return NextResponse.json({ chunk }, { status: 201 })
   } catch (error) {
     console.error('POST /api/songs/[songId]/chunks error:', error)
@@ -179,6 +181,7 @@ export async function PUT(
       orderBy: { order: 'asc' },
     })
 
+    invalidateSongsCache()
     return NextResponse.json({ chunks: updatedChunks })
   } catch (error) {
     console.error('PUT /api/songs/[songId]/chunks error:', error)

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { invalidateSongsCache } from '@/lib/songs-cache'
 
 // POST /api/songs/[songId]/audio — add an audio track to a song
 export async function POST(
@@ -48,6 +49,7 @@ export async function POST(
       },
     })
 
+    invalidateSongsCache()
     return NextResponse.json({ track }, { status: 201 })
   } catch (error) {
     console.error('POST /api/songs/[songId]/audio error:', error)
