@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
@@ -14,15 +14,6 @@ import EmptyState from '@/components/ui/EmptyState'
 import Modal from '@/components/ui/Modal'
 import { useChoirStore } from '@/stores/useChoirStore'
 
-interface Chunk {
-  id: string
-  label: string
-  chunkType: string
-  lyrics: string
-  order: number
-  lineTimestamps?: string | null
-}
-
 interface AudioTrackSummary {
   id: string
   voicePart: string
@@ -34,13 +25,16 @@ interface Song {
   composer: string | null
   lyricist: string | null
   language: string
-  chunks: Chunk[]
   audioTracks?: AudioTrackSummary[]
   youtubeVideoId?: string | null
   spotifyTrackId?: string | null
   readiness?: number
   createdAt: string
   isFavorited?: boolean
+  chunkCount: number
+  hasLyrics: boolean
+  allSynced: boolean
+  hasUnsynced: boolean
 }
 
 export default function SongsPage() {
@@ -53,10 +47,13 @@ export default function SongsPage() {
   const isDirector = session?.user?.role === 'director'
   const { activeChoirId } = useChoirStore()
 
+  const BATCH = 30
   const [songs, setSongs] = useState<Song[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const deferredSearch = useDeferredValue(searchQuery)
+  const [visibleCount, setVisibleCount] = useState(BATCH)
   const [languageFilter, setLanguageFilter] = useState<string>('all')
   const [audioSourceFilter, setAudioSourceFilter] = useState<'all' | 'voices' | 'youtube' | 'spotify' | 'none'>('all')
   const [noVersesOnly, setNoVersesOnly] = useState(false)
@@ -90,14 +87,25 @@ export default function SongsPage() {
   const fetchSongs = useCallback(async (archived: boolean) => {
     try {
       setLoading(true)
+      setVisibleCount(BATCH)
       const params = new URLSearchParams()
       if (archived) params.set('archived', 'true')
       if (activeChoirId) params.set('choirId', activeChoirId)
       const url = `/api/songs${params.toString() ? `?${params}` : ''}`
+      const t0 = performance.now()
       const res = await fetch(url)
       if (!res.ok) throw new Error('Failed to fetch')
+      const networkTime = performance.now() - t0
+      const t1 = performance.now()
       const data = await res.json()
-      setSongs(data.songs ?? [])
+      const parseTime = performance.now() - t1
+      const songList = data.songs ?? []
+      setSongs(songList)
+      if (process.env.NEXT_PUBLIC_PERF_DEBUG === '1') {
+        const serverTiming = res.headers.get('Server-Timing')
+        console.log(`[PERF] fetchSongs: network=${networkTime.toFixed(0)}ms, parse=${parseTime.toFixed(0)}ms, songs=${songList.length}, payloadSize=${JSON.stringify(data).length}`)
+        if (serverTiming) console.log(`[PERF] Server-Timing: ${serverTiming}`)
+      }
     } catch {
       setError(tCommon('error'))
     } finally {
@@ -139,10 +147,10 @@ export default function SongsPage() {
   const filteredSongs = useMemo(() => {
     const filtered = songs.filter((song) => {
       const matchesSearch =
-        !searchQuery ||
-        song.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        song.composer?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        song.lyricist?.toLowerCase().includes(searchQuery.toLowerCase())
+        !deferredSearch ||
+        song.title.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+        song.composer?.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+        song.lyricist?.toLowerCase().includes(deferredSearch.toLowerCase())
 
       const matchesLanguage =
         languageFilter === 'all' || song.language === languageFilter
@@ -168,13 +176,9 @@ export default function SongsPage() {
         }
       }
 
-      const matchesVerses = !noVersesOnly || song.chunks.length === 0
+      const matchesVerses = !noVersesOnly || song.chunkCount === 0
 
-      const lyricsChunks = song.chunks.filter((c) => c.lyrics?.trim())
-      const matchesSync = !noSyncOnly || (
-        lyricsChunks.length > 0 &&
-        !lyricsChunks.every((c) => c.lineTimestamps)
-      )
+      const matchesSync = !noSyncOnly || song.hasUnsynced
 
       return matchesSearch && matchesLanguage && matchesAudioSource && matchesVerses && matchesSync
     })
@@ -185,7 +189,14 @@ export default function SongsPage() {
       if (!a.isFavorited && b.isFavorited) return 1
       return 0
     })
-  }, [songs, searchQuery, languageFilter, audioSourceFilter, noVersesOnly, noSyncOnly])
+  }, [songs, deferredSearch, languageFilter, audioSourceFilter, noVersesOnly, noSyncOnly])
+
+  // Reset visible count when filters change
+  useEffect(() => {
+    setVisibleCount(BATCH)
+  }, [deferredSearch, languageFilter, audioSourceFilter, noVersesOnly, noSyncOnly])
+
+  const visibleSongs = filteredSongs.slice(0, visibleCount)
 
   async function handleArchive(song: Song) {
     setActionLoading(true)
@@ -455,7 +466,7 @@ export default function SongsPage() {
       setSongs((prev) =>
         prev.map((s) =>
           s.id === currentSong.id
-            ? { ...s, chunks: sections.map((sec, i) => ({ id: `temp-${i}`, label: sec.label, chunkType: sec.chunkType, lyrics: sec.lyrics, order: i, lineTimestamps: null })) }
+            ? { ...s, chunkCount: sections.length, hasLyrics: sections.some((sec) => sec.lyrics.trim()), allSynced: false, hasUnsynced: sections.some((sec) => sec.lyrics.trim()) }
             : s
         )
       )
@@ -498,7 +509,7 @@ export default function SongsPage() {
     const eligible = songs.filter((s) =>
       selectedIds.has(s.id) &&
       (s.audioTracks?.length ?? 0) > 0 &&
-      s.chunks.some((c) => c.lyrics?.trim())
+      s.hasLyrics
     )
     if (eligible.length === 0) return
 
@@ -530,16 +541,10 @@ export default function SongsPage() {
         }
         results.push({ songId: song.id, title: song.title, success: true })
         setBulkSyncResults([...results])
-        // Mark chunks as synced in local state
+        // Mark as synced in local state
         setSongs((prev) => prev.map((s) => {
           if (s.id !== song.id) return s
-          return {
-            ...s,
-            chunks: s.chunks.map((c) => ({
-              ...c,
-              lineTimestamps: c.lyrics?.trim() ? (c.lineTimestamps || '[0]') : c.lineTimestamps,
-            })),
-          }
+          return { ...s, allSynced: true, hasUnsynced: false }
         }))
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : 'Unknown error'
@@ -763,8 +768,9 @@ export default function SongsPage() {
 
       {/* Song grid */}
       {filteredSongs.length > 0 ? (
+        <>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredSongs.map((song) => {
+          {visibleSongs.map((song) => {
             const readiness = song.readiness ?? 0
             const isSelected = selectedIds.has(song.id)
             return (
@@ -885,8 +891,8 @@ export default function SongsPage() {
                 })()}
 
                 <div className="mt-2 flex items-center gap-2 text-xs text-text-muted">
-                  <span>{song.chunks.length} קטעים</span>
-                  {song.chunks.length > 0 && song.chunks.every((c) => c.lineTimestamps) && (
+                  <span>{song.chunkCount} קטעים</span>
+                  {song.allSynced && (
                     <span className="inline-flex items-center gap-0.5 text-secondary">
                       <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
                       מסונכרן
@@ -944,6 +950,17 @@ export default function SongsPage() {
             )
           })}
         </div>
+        {visibleCount < filteredSongs.length && (
+          <div className="flex justify-center pt-2">
+            <Button
+              variant="outline"
+              onClick={() => setVisibleCount((c) => c + BATCH)}
+            >
+              {`הצג עוד (${filteredSongs.length - visibleCount} נותרו)`}
+            </Button>
+          </div>
+        )}
+      </>
       ) : songs.length === 0 ? (
         showArchived ? (
           <EmptyState
@@ -1089,7 +1106,7 @@ export default function SongsPage() {
             {!bulkLyricsSearching && bulkLyricsResults.length > 0 && (
               <div className="space-y-3">
                 <p className="text-sm text-text-muted">
-                  {bulkLyricsResults.length} תוצאות — בחרו את הנכונה:
+                  {bulkLyricsResults.length} תוצאות - בחרו את הנכונה:
                 </p>
                 <div className="max-h-72 overflow-y-auto space-y-2">
                   {bulkLyricsResults.map((result, idx) => (
@@ -1108,7 +1125,7 @@ export default function SongsPage() {
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-semibold text-foreground">{result.title}</span>
                           {result.artist && (
-                            <span className="text-xs text-text-muted">— {result.artist}</span>
+                            <span className="text-xs text-text-muted">- {result.artist}</span>
                           )}
                         </div>
                         <span className="rounded-full bg-surface-hover px-2 py-0.5 text-[10px] font-medium text-text-muted">

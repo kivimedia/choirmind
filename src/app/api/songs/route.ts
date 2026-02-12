@@ -5,8 +5,14 @@ import { prisma } from '@/lib/db'
 
 // GET /api/songs — list songs for user's choir + personal songs
 export async function GET(request: NextRequest) {
+  const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
+  const timings: Record<string, number> = {}
+  const t0 = Date.now()
+
   try {
+    let t = Date.now()
     const session = await getServerSession(authOptions)
+    timings.session = Date.now() - t
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -14,10 +20,12 @@ export async function GET(request: NextRequest) {
     const userId = session.user.id
 
     // Get user's choir memberships
+    t = Date.now()
     const memberships = await prisma.choirMember.findMany({
       where: { userId },
       select: { choirId: true },
     })
+    timings.memberships = Date.now() - t
     const choirIds = memberships.map((m) => m.choirId)
 
     // Check if archived songs were requested
@@ -41,62 +49,63 @@ export async function GET(request: NextRequest) {
       orConditions.push({ isPersonal: true, personalUserId: userId })
     }
 
-    // Fetch choir songs + personal songs
-    const songs = await prisma.song.findMany({
-      where: {
-        OR: orConditions,
-        archivedAt: showArchived ? { not: null } : null,
-      },
-      include: {
-        chunks: {
-          orderBy: { order: 'asc' },
+    // Fetch songs + favorites in parallel
+    t = Date.now()
+    const [songs, allFavorites] = await Promise.all([
+      prisma.song.findMany({
+        where: {
+          OR: orConditions,
+          archivedAt: showArchived ? { not: null } : null,
         },
-        audioTracks: {
-          select: { id: true, voicePart: true },
+        include: {
+          chunks: {
+            orderBy: { order: 'asc' },
+            select: { id: true, lyrics: true, lineTimestamps: true },
+          },
+          audioTracks: {
+            select: { id: true, voicePart: true },
+          },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    })
-
-    // Supplement chunks with lineTimestamps via raw SQL (Prisma engine may not include new fields)
-    try {
-      const allChunkIds = songs.flatMap((s: any) => s.chunks.map((c: any) => c.id))
-      if (allChunkIds.length > 0) {
-        const placeholders = allChunkIds.map((_: string, i: number) => `$${i + 1}`).join(',')
-        const rows = await prisma.$queryRawUnsafe<{ id: string; lineTimestamps: string | null }[]>(
-          `SELECT id, "lineTimestamps" FROM "Chunk" WHERE id IN (${placeholders})`,
-          ...allChunkIds
-        )
-        const tsMap = new Map(rows.map((r) => [r.id, r.lineTimestamps]))
-        for (const song of songs) {
-          for (const chunk of (song as any).chunks) {
-            chunk.lineTimestamps = tsMap.get(chunk.id) ?? null
-          }
-        }
-      }
-    } catch {
-      // Non-critical: sync badges won't show but everything else works
-    }
-
-    // Fetch user's favorites to annotate songs
-    let favSet = new Set<string>()
-    try {
-      const songIds = songs.map((s) => s.id)
-      const favorites = await prisma.userFavoriteSong.findMany({
-        where: { userId, songId: { in: songIds } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.userFavoriteSong.findMany({
+        where: { userId },
         select: { songId: true },
-      })
-      favSet = new Set(favorites.map((f) => f.songId))
-    } catch {
-      // UserFavoriteSong table may not exist yet if Prisma client hasn't been regenerated
-    }
+      }).catch(() => [] as { songId: string }[]),
+    ])
+    timings.songsAndFavorites = Date.now() - t
 
-    const songsWithFavorites = songs.map((song) => ({
-      ...song,
+    const favSet = new Set(allFavorites.map((f) => f.songId))
+
+    // Build slim response — compute summary fields, exclude full lyrics
+    const songsResponse = songs.map((song) => ({
+      id: song.id,
+      title: song.title,
+      composer: song.composer,
+      lyricist: song.lyricist,
+      language: song.language,
+      youtubeVideoId: song.youtubeVideoId,
+      spotifyTrackId: song.spotifyTrackId,
+      createdAt: song.createdAt,
       isFavorited: favSet.has(song.id),
+      audioTracks: song.audioTracks,
+      chunkCount: song.chunks.length,
+      hasLyrics: song.chunks.some((c) => c.lyrics?.trim()),
+      allSynced: song.chunks.length > 0 && song.chunks.every((c) => c.lineTimestamps),
+      hasUnsynced: song.chunks.some((c) => c.lyrics?.trim() && !c.lineTimestamps),
     }))
 
-    return NextResponse.json({ songs: songsWithFavorites })
+    timings.total = Date.now() - t0
+    if (perfDebug) {
+      console.log('[PERF] GET /api/songs timings:', timings)
+    }
+
+    const response = NextResponse.json({ songs: songsResponse })
+    response.headers.set(
+      'Server-Timing',
+      Object.entries(timings).map(([k, v]) => `${k};dur=${v}`).join(', ')
+    )
+    return response
   } catch (error) {
     console.error('GET /api/songs error:', error)
     return NextResponse.json(
@@ -125,6 +134,7 @@ export async function POST(request: NextRequest) {
       chunks,
       isPersonal = false,
       choirId,
+      youtubeVideoId,
     } = body
 
     if (!title) {
@@ -171,6 +181,7 @@ export async function POST(request: NextRequest) {
           isPersonal,
           personalUserId: isPersonal ? userId : null,
           choirId: isPersonal ? null : choirId || null,
+          youtubeVideoId: youtubeVideoId || null,
         },
       })
 

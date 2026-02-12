@@ -64,15 +64,18 @@ export const authOptions: NextAuthOptions = {
     strategy: 'jwt',
   },
   callbacks: {
-    async session({ session, token }) {
-      if (session.user && token.sub) {
-        session.user.id = token.sub
+    async jwt({ token, user, trigger }) {
+      if (user) {
+        token.sub = user.id
+      }
+      // Populate role/voicePart/locale on sign-in or explicit update()
+      if (user || trigger === 'update') {
+        const start = Date.now()
         const dbUser = await prisma.user.findUnique({
           where: { id: token.sub },
           select: { role: true, voicePart: true, locale: true },
         })
         if (dbUser) {
-          // Check if user is a director in any choir
           let role = dbUser.role
           if (role !== 'director' && role !== 'admin') {
             const directorMembership = await prisma.choirMember.findFirst({
@@ -83,18 +86,25 @@ export const authOptions: NextAuthOptions = {
               role = 'director'
             }
           }
-          session.user.role = role
-          session.user.voicePart = dbUser.voicePart
-          session.user.locale = dbUser.locale
+          token.role = role
+          token.voicePart = dbUser.voicePart
+          token.locale = dbUser.locale
+        }
+        if (process.env.NEXT_PUBLIC_PERF_DEBUG === '1') {
+          console.log(`[PERF] jwt callback DB queries: ${Date.now() - start}ms`)
         }
       }
-      return session
-    },
-    async jwt({ token, user }) {
-      if (user) {
-        token.sub = user.id
-      }
       return token
+    },
+    async session({ session, token }) {
+      // Zero DB queries — just copy cached values from JWT
+      if (session.user && token.sub) {
+        session.user.id = token.sub
+        session.user.role = token.role
+        session.user.voicePart = token.voicePart
+        session.user.locale = token.locale
+      }
+      return session
     },
   },
   pages: {

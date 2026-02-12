@@ -24,5 +24,8 @@ declare module 'next-auth' {
 declare module 'next-auth/jwt' {
   interface JWT {
     sub: string
+    role?: string
+    voicePart?: string | null
+    locale?: string
   }
 }

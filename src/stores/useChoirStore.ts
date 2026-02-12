@@ -15,8 +15,16 @@ interface ChoirStore {
   loadChoirs: () => Promise<void>
 }
 
+function getPersistedChoirId(): string | null {
+  try {
+    return typeof window !== 'undefined' ? localStorage.getItem('choirmind:activeChoirId') : null
+  } catch {
+    return null
+  }
+}
+
 export const useChoirStore = create<ChoirStore>((set, get) => ({
-  activeChoirId: null,
+  activeChoirId: getPersistedChoirId(),
   choirs: [],
   loaded: false,
 
