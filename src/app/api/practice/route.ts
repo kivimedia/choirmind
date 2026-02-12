@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 
-// GET /api/practice — get today's review queue
+// GET /api/practice — get today's review queue, or chunk progress for a specific song
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -12,7 +12,26 @@ export async function GET(request: NextRequest) {
     }
 
     const userId = session.user.id
+    const songId = request.nextUrl.searchParams.get('songId')
+
+    // If songId is provided, return per-chunk progress for that song
+    if (songId) {
+      const progress = await prisma.userChunkProgress.findMany({
+        where: {
+          userId,
+          chunk: { songId },
+        },
+        select: {
+          chunkId: true,
+          fadeLevel: true,
+          status: true,
+        },
+      })
+      return NextResponse.json({ progress })
+    }
+
     const now = new Date()
+    const filterChoirId = request.nextUrl.searchParams.get('choirId')
 
     // Find all chunks due for review
     const reviewQueue = await prisma.userChunkProgress.findMany({
@@ -43,9 +62,17 @@ export async function GET(request: NextRequest) {
       },
     })
 
+    // Filter by choirId if provided
+    const filtered = filterChoirId
+      ? reviewQueue.filter((item) => {
+          const song = item.chunk.song
+          return song.choirId === filterChoirId || song.isPersonal
+        })
+      : reviewQueue
+
     return NextResponse.json({
-      reviewQueue,
-      count: reviewQueue.length,
+      reviewQueue: filtered,
+      count: filtered.length,
     })
   } catch (error) {
     console.error('GET /api/practice error:', error)

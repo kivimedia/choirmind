@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 
@@ -105,7 +106,8 @@ export default function GameSelector({
   songTitle,
   onSelectGame,
 }: GameSelectorProps) {
-  const allLocked = chunkStatus === 'fragile'
+  const [forceUnlock, setForceUnlock] = useState(false)
+  const allLocked = chunkStatus === 'fragile' && !forceUnlock
 
   return (
     <div className="flex flex-col gap-5">
@@ -132,13 +134,27 @@ export default function GameSelector({
           <p className="mt-1 text-sm text-text-muted">
             תרגלו קודם עם הדעיכה כדי לחזק את הזיכרון, ואז המשחקים ייפתחו
           </p>
+          <button
+            type="button"
+            onClick={() => setForceUnlock(true)}
+            className="mt-3 text-sm text-primary hover:underline"
+          >
+            פתח בכל זאת
+          </button>
+        </div>
+      )}
+
+      {/* Warning when force-unlocked */}
+      {forceUnlock && chunkStatus === 'fragile' && (
+        <div className="rounded-lg border border-warning/40 bg-warning/10 px-4 py-2 text-sm text-foreground">
+          המשחקים יעילים יותר אחרי תרגול ראשוני עם הדעיכה. מומלץ קודם לתרגל!
         </div>
       )}
 
       {/* Game cards grid */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {GAMES.map((game) => {
-          const isUnlocked = statusAtLeast(chunkStatus, game.minStatus)
+          const isUnlocked = forceUnlock || statusAtLeast(chunkStatus, game.minStatus)
 
           return (
             <Card
@@ -168,6 +184,18 @@ export default function GameSelector({
                     ? game.description
                     : `נדרש: ${STATUS_LABELS[game.minStatus] ?? game.minStatus}`}
                 </p>
+                {!isUnlocked && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setForceUnlock(true)
+                    }}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    פתח בכל זאת
+                  </button>
+                )}
               </div>
             </Card>
           )

@@ -10,6 +10,8 @@ import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import ProgressBar from '@/components/ui/ProgressBar'
 import Modal from '@/components/ui/Modal'
+import AudioPlayer from '@/components/audio/AudioPlayer'
+import type { AudioTrackData, VoicePart } from '@/lib/audio/types'
 
 interface Chunk {
   id: string
@@ -18,6 +20,13 @@ interface Chunk {
   lyrics: string
   order: number
   memoryStatus?: string
+  lineTimestamps?: string | null
+}
+
+interface AudioTrack {
+  id: string
+  voicePart: string
+  fileUrl: string
 }
 
 interface Song {
@@ -29,10 +38,15 @@ interface Song {
   language: string
   textDirection: string
   chunks: Chunk[]
+  audioTracks?: AudioTrack[]
+  source?: string | null
   readiness?: number
   isPersonal: boolean
   personalUserId: string | null
   choirId: string | null
+  spotifyTrackId?: string | null
+  spotifyEmbed?: string | null
+  youtubeVideoId?: string | null
 }
 
 type MemoryStatusVariant = 'fragile' | 'shaky' | 'developing' | 'solid' | 'locked' | 'default'
@@ -64,14 +78,16 @@ export default function SongDetailPage() {
   const tPractice = useTranslations('practice')
   const tGames = useTranslations('games')
   const tCommon = useTranslations('common')
+  const tAudio = useTranslations('audio')
+  const tVoiceParts = useTranslations('voiceParts')
 
   const songId = params.songId as string
 
   const [song, setSong] = useState<Song | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
-  const [deleting, setDeleting] = useState(false)
+  const [archiveModalOpen, setArchiveModalOpen] = useState(false)
+  const [archiving, setArchiving] = useState(false)
 
   const isDirector = session?.user?.role === 'director'
 
@@ -94,20 +110,24 @@ export default function SongDetailPage() {
     if (songId) fetchSong()
   }, [songId, tCommon])
 
-  async function handleDelete() {
-    setDeleting(true)
+  async function handleArchive() {
+    setArchiving(true)
     try {
-      const res = await fetch(`/api/songs/${songId}`, { method: 'DELETE' })
+      const res = await fetch(`/api/songs/${songId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'archive' }),
+      })
       if (!res.ok) {
         const data = await res.json()
-        throw new Error(data.error || 'Failed to delete')
+        throw new Error(data.error || 'Failed to archive')
       }
       router.push('/songs')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : tCommon('error'))
-      setDeleteModalOpen(false)
+      setArchiveModalOpen(false)
     } finally {
-      setDeleting(false)
+      setArchiving(false)
     }
   }
 
@@ -223,25 +243,25 @@ export default function SongDetailPage() {
           </div>
         </div>
 
-        {/* Actions for directors */}
-        {isDirector && (
-          <div className="flex items-center gap-2">
+        {/* Actions */}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push(`/songs/${songId}/edit`)}
+          >
+            {t('edit')}
+          </Button>
+          {isDirector && (
             <Button
               variant="outline"
               size="sm"
-              onClick={() => router.push(`/songs/${songId}/edit`)}
+              onClick={() => setArchiveModalOpen(true)}
             >
-              {t('edit')}
+              העבר לארכיון
             </Button>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setDeleteModalOpen(true)}
-            >
-              {t('delete')}
-            </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Action buttons */}
@@ -257,6 +277,43 @@ export default function SongDetailPage() {
           </Button>
         </Link>
       </div>
+
+      {/* Audio player: voice-part tracks preferred, YouTube/Spotify fallback */}
+      {(song.audioTracks && song.audioTracks.length > 0) || song.youtubeVideoId || song.spotifyTrackId ? (
+        <AudioPlayer
+          audioTracks={(song.audioTracks ?? []).map((t) => ({
+            id: t.id,
+            songId: song.id,
+            voicePart: t.voicePart as VoicePart,
+            fileUrl: t.fileUrl,
+          } as AudioTrackData))}
+          userVoicePart={(session?.user as any)?.voicePart as VoicePart | undefined}
+          youtubeVideoId={song.youtubeVideoId}
+          spotifyTrackId={song.spotifyTrackId}
+          locale={song.language === 'en' ? 'en' : 'he'}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            const query = [song.title, song.composer].filter(Boolean).join(' ')
+            window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, '_blank')
+          }}
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm font-medium text-text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+          </svg>
+          Find on YouTube
+        </button>
+      )}
+
+      {/* Voice part info (shown below the player when tracks exist) */}
+      {song.audioTracks && song.audioTracks.length > 0 && song.source && (
+        <div className="flex items-center gap-2 text-xs text-text-muted">
+          <span>{tAudio('audioSource')}: {song.source}</span>
+        </div>
+      )}
 
       {/* Overall readiness */}
       {typeof song.readiness === 'number' && (
@@ -274,9 +331,32 @@ export default function SongDetailPage() {
 
       {/* Chunks list */}
       <div>
-        <h2 className="mb-3 text-lg font-semibold text-foreground">
-          קטעי השיר ({song.chunks.length})
-        </h2>
+        <div className="mb-3 flex items-center gap-3">
+          <h2 className="text-lg font-semibold text-foreground">
+            קטעי השיר ({song.chunks.length})
+          </h2>
+          {song.youtubeVideoId && song.chunks.length > 0 && (() => {
+            const syncedCount = song.chunks.filter((c) => c.lineTimestamps).length
+            const allSynced = syncedCount === song.chunks.length
+            return (
+              <span className={[
+                'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium',
+                allSynced
+                  ? 'bg-secondary/15 text-secondary'
+                  : 'bg-border/40 text-text-muted',
+              ].join(' ')}>
+                {allSynced ? (
+                  <>
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                    מסונכרן
+                  </>
+                ) : (
+                  `${syncedCount}/${song.chunks.length} מסונכרנים`
+                )}
+              </span>
+            )
+          })()}
+        </div>
         <div className="space-y-3">
           {song.chunks.map((chunk) => (
             <Card key={chunk.id} className="!p-4">
@@ -297,6 +377,11 @@ export default function SongDetailPage() {
                     <span className="text-xs text-text-muted">
                       {getChunkTypeLabel(chunk.chunkType)}
                     </span>
+                    {chunk.lineTimestamps && (
+                      <span className="inline-flex items-center gap-0.5 text-xs text-secondary">
+                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+                      </span>
+                    )}
                   </div>
                   <p
                     className="whitespace-pre-line text-sm leading-relaxed text-foreground line-clamp-4"
@@ -324,30 +409,30 @@ export default function SongDetailPage() {
         </div>
       </div>
 
-      {/* Delete confirmation modal */}
+      {/* Archive confirmation modal */}
       <Modal
-        isOpen={deleteModalOpen}
-        onClose={() => setDeleteModalOpen(false)}
-        title={t('delete')}
+        isOpen={archiveModalOpen}
+        onClose={() => setArchiveModalOpen(false)}
+        title="העברה לארכיון"
       >
         <div className="space-y-4">
           <p className="text-foreground">
-            בטוחים שרוצים למחוק את &quot;{song.title}&quot;? הפעולה לא ניתנת
-            לביטול.
+            להעביר את &quot;{song.title}&quot; לארכיון? ניתן לשחזר בכל עת
+            מתוך דף הספרייה.
           </p>
           <div className="flex items-center justify-end gap-3">
             <Button
               variant="ghost"
-              onClick={() => setDeleteModalOpen(false)}
+              onClick={() => setArchiveModalOpen(false)}
             >
               {tCommon('cancel')}
             </Button>
             <Button
-              variant="danger"
-              loading={deleting}
-              onClick={handleDelete}
+              variant="primary"
+              loading={archiving}
+              onClick={handleArchive}
             >
-              {tCommon('delete')}
+              העבר לארכיון
             </Button>
           </div>
         </div>

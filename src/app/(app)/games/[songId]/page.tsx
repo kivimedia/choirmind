@@ -9,7 +9,10 @@ import GameSelector from '@/components/games/GameSelector'
 import WordScramble from '@/components/games/WordScramble'
 import FillTheBlank from '@/components/games/FillTheBlank'
 import FinishTheLine from '@/components/games/FinishTheLine'
+import AudioPlayer from '@/components/audio/AudioPlayer'
+import KaraokeDisplay from '@/components/practice/KaraokeDisplay'
 import { calculateGameXP } from '@/lib/game-utils'
+import type { AudioTrackData } from '@/lib/audio/types'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,12 +23,16 @@ interface Chunk {
   label: string
   lyrics: string
   order: number
+  lineTimestamps: number[] | null
 }
 
 interface Song {
   id: string
   title: string
   chunks: Chunk[]
+  spotifyTrackId?: string | null
+  youtubeVideoId?: string | null
+  audioTracks?: AudioTrackData[]
 }
 
 interface ChunkProgress {
@@ -58,21 +65,40 @@ export default function GamesPage() {
     xpEarned: number
   } | null>(null)
   const [submittingScore, setSubmittingScore] = useState(false)
+  const [currentTimeMs, setCurrentTimeMs] = useState(0)
 
   // -----------------------------------------------------------------------
-  // Fetch song data
+  // Fetch song data + audio tracks
   // -----------------------------------------------------------------------
 
   useEffect(() => {
     async function fetchSong() {
       try {
         setLoading(true)
-        const res = await fetch(`/api/songs/${songId}`)
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}))
+        const [songRes, audioRes] = await Promise.all([
+          fetch(`/api/songs/${songId}`),
+          fetch(`/api/songs/${songId}/audio-tracks`),
+        ])
+        if (!songRes.ok) {
+          const data = await songRes.json().catch(() => ({}))
           throw new Error(data.error || 'Failed to fetch song')
         }
-        const { song: songData } = await res.json()
+        const { song: raw } = await songRes.json()
+
+        let audioTracks: AudioTrackData[] = []
+        if (audioRes.ok) {
+          const audioJson = await audioRes.json()
+          audioTracks = audioJson.audioTracks ?? []
+        }
+
+        const songData = {
+          ...raw,
+          audioTracks,
+          chunks: (raw.chunks || []).map((c: any) => ({
+            ...c,
+            lineTimestamps: c.lineTimestamps ? JSON.parse(c.lineTimestamps) : null,
+          })),
+        }
         setSong(songData)
 
         // Auto-select first chunk
@@ -332,6 +358,34 @@ export default function GamesPage() {
           </svg>
           חזרה למשחקים
         </button>
+        <a
+          href={`/songs/${songId}/edit`}
+          className="mb-4 inline-block text-xs text-primary hover:underline"
+        >
+          עריכה
+        </a>
+
+        {/* Audio player during game */}
+        <div className="mb-4">
+          <AudioPlayer
+            audioTracks={song.audioTracks ?? []}
+            youtubeVideoId={song.youtubeVideoId}
+            spotifyTrackId={song.spotifyTrackId}
+            onTimeUpdate={setCurrentTimeMs}
+          />
+        </div>
+
+        {/* Karaoke display — only for fill-the-blank (word-scramble and finish-the-line test recall) */}
+        {selectedChunk.lineTimestamps && activeGame === 'fill-the-blank' && (
+          <div className="mb-4 rounded-xl border border-border bg-surface p-4 overflow-y-auto max-h-48">
+            <KaraokeDisplay
+              lyrics={selectedChunk.lyrics}
+              fadeLevel={0}
+              timestamps={selectedChunk.lineTimestamps}
+              currentTimeMs={currentTimeMs}
+            />
+          </div>
+        )}
 
         {/* Render game */}
         {activeGame === 'word-scramble' && (
@@ -374,6 +428,16 @@ export default function GamesPage() {
         <p className="text-sm text-text-muted">משחקי שינון</p>
       </div>
 
+      {/* Audio player */}
+      <div className="mb-6">
+        <AudioPlayer
+          audioTracks={song.audioTracks ?? []}
+          youtubeVideoId={song.youtubeVideoId}
+          spotifyTrackId={song.spotifyTrackId}
+          onTimeUpdate={setCurrentTimeMs}
+        />
+      </div>
+
       {/* Chunk selector */}
       <div className="mb-6">
         <Select
@@ -386,6 +450,7 @@ export default function GamesPage() {
           onChange={(e) => {
             setSelectedChunkId(e.target.value)
             setActiveGame(null)
+            setCurrentTimeMs(0)
           }}
         />
       </div>

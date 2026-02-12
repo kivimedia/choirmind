@@ -10,6 +10,7 @@ import Select from '@/components/ui/Select'
 import Tabs from '@/components/ui/Tabs'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
+import { useChoirStore } from '@/stores/useChoirStore'
 
 // ── Chunk types and Hebrew header patterns ──────────────────────────
 
@@ -121,6 +122,7 @@ export default function NewSongPage() {
   const t = useTranslations('songs')
   const tChunks = useTranslations('chunks')
   const tCommon = useTranslations('common')
+  const { activeChoirId } = useChoirStore()
 
   // Shared fields
   const [title, setTitle] = useState('')
@@ -242,7 +244,8 @@ export default function NewSongPage() {
           composer: composer.trim() || undefined,
           lyricist: lyricist.trim() || undefined,
           language,
-          isPersonal: true,
+          isPersonal: !activeChoirId,
+          choirId: activeChoirId || undefined,
           chunks: chunksToSave,
         }),
       })
@@ -359,7 +362,7 @@ export default function NewSongPage() {
                   dir="auto"
                 />
               </div>
-              <div className="w-36">
+              <div className="w-28 sm:w-36">
                 <Select
                   label="סוג"
                   options={chunkTypeOptions}

@@ -28,7 +28,7 @@ interface RatingOption {
 const RATING_OPTIONS: RatingOption[] = [
   {
     rating: 'nailed_it',
-    label: '\u202Bשלטתי בזה 🎯\u202C',
+    label: '\u202Bשלטתי בזה\u202C',
     bgClass: 'bg-status-solid',
     hoverBgClass: 'hover:bg-status-solid/90',
     activeBgClass: 'active:bg-status-solid/80',
@@ -36,15 +36,15 @@ const RATING_OPTIONS: RatingOption[] = [
   },
   {
     rating: 'almost',
-    label: '\u202Bכמעט 🤏\u202C',
-    bgClass: 'bg-warning',
-    hoverBgClass: 'hover:bg-warning/90',
-    activeBgClass: 'active:bg-warning/80',
-    ringClass: 'focus-visible:ring-warning/50',
+    label: '\u202Bכמעט\u202C',
+    bgClass: 'bg-amber-500',
+    hoverBgClass: 'hover:bg-amber-600',
+    activeBgClass: 'active:bg-amber-700',
+    ringClass: 'focus-visible:ring-amber-500/50',
   },
   {
     rating: 'struggling',
-    label: '\u202Bמתקשה 😅\u202C',
+    label: '\u202Bמתקשה\u202C',
     bgClass: 'bg-danger',
     hoverBgClass: 'hover:bg-danger/90',
     activeBgClass: 'active:bg-danger/80',

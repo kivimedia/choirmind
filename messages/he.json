@@ -12,7 +12,9 @@
     "settings": "הגדרות",
     "profile": "פרופיל",
     "logout": "התנתק/י",
-    "login": "התחבר/י"
+    "login": "התחבר/י",
+    "allChoirs": "כל המקהלות",
+    "manageChoir": "ניהול מקהלה"
   },
   "auth": {
     "signIn": "התחבר/י",
@@ -34,7 +36,25 @@
     "alto": "אלט",
     "tenor": "טנור",
     "baritone": "בריטון",
-    "bass": "בס"
+    "bass": "בס",
+    "mix": "מיקס",
+    "playback": "פלייבק",
+    "full": "מלא"
+  },
+  "audio": {
+    "player": "נגן שמע",
+    "voicePart": "קול",
+    "speed": "מהירות",
+    "uploadAudio": "העלאת שמע",
+    "dragDrop": "גררו קבצי שמע לכאן או לחצו לבחירה",
+    "fileTypes": "MP3, M4A, WAV, OGG — עד 50MB",
+    "uploading": "מעלה...",
+    "uploaded": "הועלה",
+    "uploadError": "שגיאה בהעלאה",
+    "deleteTrack": "מחק",
+    "noAudio": "אין קבצי שמע",
+    "availableParts": "קולות זמינים",
+    "audioSource": "מקור שמע"
   },
   "songs": {
     "title": "ספריית שירים",
@@ -196,5 +216,30 @@
     "emotion": "איזו רגש הקטע הזה מעביר?",
     "image": "איזו תמונה עולה לך בראש כששרים את זה?",
     "connection": "איך הקטע הזה מתחבר לקטע שלפניו?"
+  },
+  "choirManage": {
+    "title": "ניהול מקהלה",
+    "choirSettings": "הגדרות מקהלה",
+    "choirName": "שם המקהלה",
+    "inviteCode": "קוד הזמנה",
+    "regenerateCode": "קוד חדש",
+    "copied": "הועתק!",
+    "locale": "שפה",
+    "weekStart": "תחילת שבוע",
+    "sunday": "יום ראשון",
+    "monday": "יום שני",
+    "saveSettings": "שמור הגדרות",
+    "members": "חברים",
+    "role": "תפקיד",
+    "director": "מנצח",
+    "member": "חבר",
+    "promote": "קדם למנצח",
+    "demote": "הורד לחבר",
+    "removeMember": "הסר מהמקהלה",
+    "removeConfirm": "להסיר את {name} מהמקהלה?",
+    "dangerZone": "אזור מסוכן",
+    "deleteChoir": "מחק מקהלה",
+    "deleteConfirm": "למחוק את המקהלה? פעולה זו לא ניתנת לביטול.",
+    "saved": "נשמר בהצלחה"
   }
 }

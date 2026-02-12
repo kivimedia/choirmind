@@ -10,7 +10,7 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, helperText, dir = 'auto', className = '', id, ...rest }, ref) => {
+  ({ label, error, helperText, dir, className = '', id, ...rest }, ref) => {
     const generatedId = useId()
     const inputId = id ?? generatedId
     const errorId = error ? `${inputId}-error` : undefined

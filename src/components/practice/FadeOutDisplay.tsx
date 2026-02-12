@@ -115,7 +115,7 @@ export default function FadeOutDisplay({
                 return (
                   <span
                     key={globalIdx}
-                    className="word-fade-out inline-block"
+                    className="word-fade-out"
                     style={{ opacity: 1 }}
                   >
                     {faded.word}

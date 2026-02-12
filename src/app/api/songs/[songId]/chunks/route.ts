@@ -46,9 +46,9 @@ export async function POST(
     const body = await request.json()
     const { label, chunkType = 'verse', order, lyrics, textDirection, audioStartMs, audioEndMs } = body
 
-    if (!label || !lyrics) {
+    if (!label) {
       return NextResponse.json(
-        { error: 'Label and lyrics are required' },
+        { error: 'Label is required' },
         { status: 400 }
       )
     }
@@ -119,24 +119,59 @@ export async function PUT(
     }
 
     const body = await request.json()
-    const { chunks } = body // Array of { id, order }
+    const { chunks } = body // Array of { id, order, label?, lyrics? }
 
     if (!chunks || !Array.isArray(chunks)) {
       return NextResponse.json(
-        { error: 'chunks array is required with { id, order } entries' },
+        { error: 'chunks array is required' },
         { status: 400 }
       )
     }
 
-    // Update all chunk orders in a transaction
+    // Detect lyrics changes so we can auto-clear timestamps
+    const existingChunks = await prisma.chunk.findMany({
+      where: { songId, id: { in: chunks.map((c: { id: string }) => c.id) } },
+      select: { id: true, lyrics: true },
+    })
+    const existingLyricsMap = new Map(existingChunks.map((c) => [c.id, c.lyrics]))
+
+    // Only clear timestamps when the line structure changed (added/removed lines), not word edits
+    const countNonEmpty = (text: string) => text.split('\n').filter((l) => l.trim()).length
+    const lyricsChangedIds = chunks
+      .filter((chunk: { id: string; lyrics?: string }) => {
+        if (chunk.lyrics === undefined) return false
+        const oldLyrics = existingLyricsMap.get(chunk.id)
+        if (oldLyrics === undefined) return false
+        return countNonEmpty(chunk.lyrics) !== countNonEmpty(oldLyrics)
+      })
+      .map((chunk: { id: string }) => chunk.id)
+
+    // Update all chunks in a transaction
     await prisma.$transaction(
-      chunks.map((chunk: { id: string; order: number }) =>
+      chunks.map((chunk: { id: string; order?: number; label?: string; lyrics?: string }) =>
         prisma.chunk.update({
           where: { id: chunk.id },
-          data: { order: chunk.order },
+          data: {
+            ...(chunk.order !== undefined && { order: chunk.order }),
+            ...(chunk.label !== undefined && { label: chunk.label }),
+            ...(chunk.lyrics !== undefined && { lyrics: chunk.lyrics }),
+          },
         })
       )
     )
+
+    // Auto-clear timestamps for chunks whose lyrics changed (raw SQL to avoid engine mismatch)
+    if (lyricsChangedIds.length > 0) {
+      try {
+        const placeholders = lyricsChangedIds.map((_, i) => `$${i + 1}`).join(',')
+        await prisma.$executeRawUnsafe(
+          `UPDATE "Chunk" SET "lineTimestamps" = NULL WHERE id IN (${placeholders})`,
+          ...lyricsChangedIds
+        )
+      } catch {
+        // Non-critical: timestamps will be stale but re-sync will fix them
+      }
+    }
 
     // Return updated chunks
     const updatedChunks = await prisma.chunk.findMany({

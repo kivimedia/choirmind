@@ -11,18 +11,10 @@ export default function SignInPage() {
   const t = useTranslations('auth')
   const tCommon = useTranslations('common')
 
-  // Magic link state
   const [magicEmail, setMagicEmail] = useState('')
   const [magicLinkSent, setMagicLinkSent] = useState(false)
   const [magicLoading, setMagicLoading] = useState(false)
-
-  // Dev login state
-  const [devEmail, setDevEmail] = useState('')
-  const [devName, setDevName] = useState('')
-  const [devLoading, setDevLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  // Google sign in
   const [googleLoading, setGoogleLoading] = useState(false)
 
   async function handleMagicLink() {
@@ -30,11 +22,16 @@ export default function SignInPage() {
     setMagicLoading(true)
     setError(null)
     try {
-      await signIn('email', {
+      const result = await signIn('email', {
         email: magicEmail,
         redirect: false,
+        callbackUrl: '/',
       })
-      setMagicLinkSent(true)
+      if (result?.error) {
+        setError(result.error)
+      } else {
+        setMagicLinkSent(true)
+      }
     } catch {
       setError(tCommon('error'))
     } finally {
@@ -50,28 +47,6 @@ export default function SignInPage() {
     } catch {
       setError(tCommon('error'))
       setGoogleLoading(false)
-    }
-  }
-
-  async function handleDevLogin() {
-    if (!devEmail.trim()) return
-    setDevLoading(true)
-    setError(null)
-    try {
-      const result = await signIn('credentials', {
-        email: devEmail,
-        name: devName || undefined,
-        redirect: false,
-      })
-      if (result?.error) {
-        setError(result.error)
-      } else if (result?.ok) {
-        window.location.href = '/'
-      }
-    } catch {
-      setError(tCommon('error'))
-    } finally {
-      setDevLoading(false)
     }
   }
 
@@ -173,47 +148,6 @@ export default function SignInPage() {
             </Button>
           </div>
         </Card>
-
-        {/* Dev login card */}
-        {process.env.NODE_ENV !== 'production' && (
-          <Card className="!p-6 border-warning/40">
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <span className="text-lg" aria-hidden="true">
-                  &#128736;
-                </span>
-                <h3 className="text-sm font-semibold text-warning">
-                  Dev Login
-                </h3>
-              </div>
-
-              <Input
-                label={t('email')}
-                type="email"
-                placeholder="test@choirmind.com"
-                value={devEmail}
-                onChange={(e) => setDevEmail(e.target.value)}
-                dir="ltr"
-              />
-              <Input
-                label={t('name')}
-                placeholder="Test User"
-                value={devName}
-                onChange={(e) => setDevName(e.target.value)}
-                dir="auto"
-              />
-              <Button
-                variant="secondary"
-                size="md"
-                className="w-full"
-                loading={devLoading}
-                onClick={handleDevLogin}
-              >
-                Dev Login
-              </Button>
-            </div>
-          </Card>
-        )}
       </div>
     </div>
   )

@@ -20,23 +20,83 @@ export async function GET(request: NextRequest) {
     })
     const choirIds = memberships.map((m) => m.choirId)
 
+    // Check if archived songs were requested
+    const showArchived = request.nextUrl.searchParams.get('archived') === 'true'
+
+    // Optional choir filter
+    const filterChoirId = request.nextUrl.searchParams.get('choirId')
+
+    // Build the OR conditions for song query
+    const orConditions: Record<string, unknown>[] = []
+    if (filterChoirId) {
+      // Only show songs from the specified choir (must be a member)
+      if (choirIds.includes(filterChoirId)) {
+        orConditions.push({ choirId: filterChoirId })
+      }
+      // Always include personal songs
+      orConditions.push({ isPersonal: true, personalUserId: userId })
+    } else {
+      // Show all choirs the user belongs to
+      orConditions.push({ choirId: { in: choirIds } })
+      orConditions.push({ isPersonal: true, personalUserId: userId })
+    }
+
     // Fetch choir songs + personal songs
     const songs = await prisma.song.findMany({
       where: {
-        OR: [
-          { choirId: { in: choirIds } },
-          { isPersonal: true, personalUserId: userId },
-        ],
+        OR: orConditions,
+        archivedAt: showArchived ? { not: null } : null,
       },
       include: {
         chunks: {
           orderBy: { order: 'asc' },
         },
+        audioTracks: {
+          select: { id: true, voicePart: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
     })
 
-    return NextResponse.json({ songs })
+    // Supplement chunks with lineTimestamps via raw SQL (Prisma engine may not include new fields)
+    try {
+      const allChunkIds = songs.flatMap((s: any) => s.chunks.map((c: any) => c.id))
+      if (allChunkIds.length > 0) {
+        const placeholders = allChunkIds.map((_: string, i: number) => `$${i + 1}`).join(',')
+        const rows = await prisma.$queryRawUnsafe<{ id: string; lineTimestamps: string | null }[]>(
+          `SELECT id, "lineTimestamps" FROM "Chunk" WHERE id IN (${placeholders})`,
+          ...allChunkIds
+        )
+        const tsMap = new Map(rows.map((r) => [r.id, r.lineTimestamps]))
+        for (const song of songs) {
+          for (const chunk of (song as any).chunks) {
+            chunk.lineTimestamps = tsMap.get(chunk.id) ?? null
+          }
+        }
+      }
+    } catch {
+      // Non-critical: sync badges won't show but everything else works
+    }
+
+    // Fetch user's favorites to annotate songs
+    let favSet = new Set<string>()
+    try {
+      const songIds = songs.map((s) => s.id)
+      const favorites = await prisma.userFavoriteSong.findMany({
+        where: { userId, songId: { in: songIds } },
+        select: { songId: true },
+      })
+      favSet = new Set(favorites.map((f) => f.songId))
+    } catch {
+      // UserFavoriteSong table may not exist yet if Prisma client hasn't been regenerated
+    }
+
+    const songsWithFavorites = songs.map((song) => ({
+      ...song,
+      isFavorited: favSet.has(song.id),
+    }))
+
+    return NextResponse.json({ songs: songsWithFavorites })
   } catch (error) {
     console.error('GET /api/songs error:', error)
     return NextResponse.json(

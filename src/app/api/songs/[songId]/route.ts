@@ -47,6 +47,24 @@ export async function GET(
       }
     }
 
+    // Supplement chunks with lineTimestamps from raw SQL (Prisma engine may not include new fields)
+    try {
+      const chunkIds = song.chunks.map((c) => c.id)
+      if (chunkIds.length > 0) {
+        const placeholders = chunkIds.map((_, i) => `$${i + 1}`).join(',')
+        const rows = await prisma.$queryRawUnsafe<{ id: string; lineTimestamps: string | null }[]>(
+          `SELECT id, "lineTimestamps" FROM "Chunk" WHERE id IN (${placeholders})`,
+          ...chunkIds
+        )
+        const tsMap = new Map(rows.map((r) => [r.id, r.lineTimestamps]))
+        for (const chunk of song.chunks as any[]) {
+          chunk.lineTimestamps = tsMap.get(chunk.id) ?? null
+        }
+      }
+    } catch {
+      // If raw query fails, lineTimestamps will be missing (non-critical)
+    }
+
     return NextResponse.json({ song })
   } catch (error) {
     console.error('GET /api/songs/[songId] error:', error)
@@ -90,9 +108,9 @@ export async function PUT(
           userId_choirId: { userId, choirId: existingSong.choirId },
         },
       })
-      if (!membership || membership.role !== 'director') {
+      if (!membership) {
         return NextResponse.json(
-          { error: 'Only directors can edit choir songs' },
+          { error: 'You must be a choir member to edit songs' },
           { status: 403 }
         )
       }
@@ -109,6 +127,7 @@ export async function PUT(
       isMedley,
       spotifyTrackId,
       spotifyEmbed,
+      youtubeVideoId,
       targetDate,
       concertOrder,
       tags,
@@ -126,6 +145,7 @@ export async function PUT(
         ...(isMedley !== undefined && { isMedley }),
         ...(spotifyTrackId !== undefined && { spotifyTrackId }),
         ...(spotifyEmbed !== undefined && { spotifyEmbed }),
+        ...(youtubeVideoId !== undefined && { youtubeVideoId }),
         ...(targetDate !== undefined && { targetDate: targetDate ? new Date(targetDate) : null }),
         ...(concertOrder !== undefined && { concertOrder }),
         ...(tags !== undefined && { tags: typeof tags === 'string' ? tags : JSON.stringify(tags) }),
@@ -147,7 +167,71 @@ export async function PUT(
   }
 }
 
-// DELETE /api/songs/[songId] — delete song
+// PATCH /api/songs/[songId] — archive or unarchive a song
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ songId: string }> }
+) {
+  try {
+    const session = await getServerSession(authOptions)
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { songId } = await params
+    const userId = session.user.id
+    const body = await request.json()
+    const { action } = body // 'archive' or 'unarchive'
+
+    if (!['archive', 'unarchive'].includes(action)) {
+      return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
+    }
+
+    const existingSong = await prisma.song.findUnique({
+      where: { id: songId },
+    })
+
+    if (!existingSong) {
+      return NextResponse.json({ error: 'Song not found' }, { status: 404 })
+    }
+
+    // Verify access: directors can archive/unarchive choir songs, owners can archive personal songs
+    if (existingSong.isPersonal) {
+      if (existingSong.personalUserId !== userId) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    } else if (existingSong.choirId) {
+      const membership = await prisma.choirMember.findUnique({
+        where: {
+          userId_choirId: { userId, choirId: existingSong.choirId },
+        },
+      })
+      if (!membership || membership.role !== 'director') {
+        return NextResponse.json(
+          { error: 'Only directors can archive choir songs' },
+          { status: 403 }
+        )
+      }
+    }
+
+    const song = await prisma.song.update({
+      where: { id: songId },
+      data: {
+        archivedAt: action === 'archive' ? new Date() : null,
+      },
+    })
+
+    return NextResponse.json({ song, archived: action === 'archive' })
+  } catch (error) {
+    console.error('PATCH /api/songs/[songId] error:', error)
+    return NextResponse.json(
+      { error: 'Failed to update song' },
+      { status: 500 }
+    )
+  }
+}
+
+// DELETE /api/songs/[songId] — permanently delete song (director only, archived songs only)
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ songId: string }> }
@@ -186,6 +270,14 @@ export async function DELETE(
           { status: 403 }
         )
       }
+    }
+
+    // Only allow permanent delete of archived songs
+    if (!existingSong.archivedAt) {
+      return NextResponse.json(
+        { error: 'Song must be archived before it can be permanently deleted' },
+        { status: 400 }
+      )
     }
 
     await prisma.song.delete({ where: { id: songId } })

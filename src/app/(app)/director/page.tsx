@@ -9,6 +9,7 @@ import ProgressBar from '@/components/ui/ProgressBar'
 import EmptyState from '@/components/ui/EmptyState'
 import InviteModal from '@/components/dashboard/InviteModal'
 import AssignmentModal from '@/components/dashboard/AssignmentModal'
+import { useChoirStore } from '@/stores/useChoirStore'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -163,6 +164,7 @@ function AccessDenied() {
 
 export default function DirectorPage() {
   const { data: session } = useSession()
+  const { activeChoirId } = useChoirStore()
 
   const [choir, setChoir] = useState<ChoirData | null>(null)
   const [members, setMembers] = useState<MemberData[]>([])
@@ -179,11 +181,18 @@ export default function DirectorPage() {
   useEffect(() => {
     async function fetchAll() {
       try {
+        const membersUrl = activeChoirId
+          ? `/api/choir/members?choirId=${activeChoirId}`
+          : '/api/choir/members'
+        const songsUrl = activeChoirId
+          ? `/api/songs?choirId=${activeChoirId}`
+          : '/api/songs'
+
         const [choirRes, membersRes, songsRes, assignmentsRes] =
           await Promise.allSettled([
             fetch('/api/choir'),
-            fetch('/api/choir/members'),
-            fetch('/api/songs'),
+            fetch(membersUrl),
+            fetch(songsUrl),
             fetch('/api/assignments'),
           ])
 
@@ -191,10 +200,13 @@ export default function DirectorPage() {
         if (choirRes.status === 'fulfilled' && choirRes.value.ok) {
           const data = await choirRes.value.json()
           const choirs = data.choirs ?? []
-          // Find a choir where user is director
-          const directorChoir = choirs.find(
-            (c: ChoirData) => c.role === 'director'
-          )
+          // Use activeChoirId from store, or find a choir where user is director
+          const activeChoir = activeChoirId
+            ? choirs.find((c: ChoirData) => c.id === activeChoirId)
+            : null
+          const directorChoir = activeChoir?.role === 'director'
+            ? activeChoir
+            : choirs.find((c: ChoirData) => c.role === 'director')
           if (directorChoir) {
             setChoir(directorChoir)
             setIsDirector(true)
@@ -246,48 +258,12 @@ export default function DirectorPage() {
     }
 
     fetchAll()
-  }, [])
+  }, [activeChoirId])
 
   // ---- Derived: trouble spots ----
-  // In a real app, trouble spots would require per-chunk per-member data.
-  // We simulate by identifying chunks from songs and comparing against member readiness.
-  const troubleSpots = useMemo(() => {
-    if (members.length === 0 || songs.length === 0) return []
-
-    // Average readiness across members
-    const avgReadiness =
-      members.length > 0
-        ? Math.round(
-            members.reduce((sum, m) => sum + m.songReadiness.readinessPercent, 0) /
-              members.length
-          )
-        : 0
-
-    // If overall readiness is low, list song chunks as trouble spots
-    // This is a best-effort approximation without per-chunk-per-member data
-    const spots: { songTitle: string; chunkLabel: string; readiness: number; chunkId: string }[] = []
-
-    for (const song of songs) {
-      for (const chunk of song.chunks) {
-        // Simulate trouble spots: if overall readiness < 50, mark early chunks
-        // In production this would use actual per-chunk aggregation
-        const simulatedReadiness = Math.min(
-          avgReadiness + Math.floor(Math.random() * 30),
-          100
-        )
-        if (simulatedReadiness < 50) {
-          spots.push({
-            songTitle: song.title,
-            chunkLabel: chunk.label,
-            readiness: simulatedReadiness,
-            chunkId: chunk.id,
-          })
-        }
-      }
-    }
-
-    return spots.slice(0, 10) // Limit to top 10
-  }, [members, songs])
+  // Without per-chunk-per-member progress aggregation, we cannot determine real trouble spots.
+  // This section is intentionally empty until real data is available.
+  const troubleSpots: { songTitle: string; chunkLabel: string; readiness: number; chunkId: string }[] = []
 
   // ---- Derived: overall choir readiness ----
   const overallChoirReadiness = useMemo(() => {
@@ -298,22 +274,16 @@ export default function DirectorPage() {
     )
   }, [members])
 
-  // ---- Derived: per-song readiness (% of members at solid+) ----
+  // ---- Derived: per-song readiness (uses members' overall readiness) ----
   const songReadinessMap = useMemo(() => {
-    // Without per-song per-member data, we use the members' overall readiness as an estimate
-    // In production this would be computed from actual progress data
     const map: Record<string, number> = {}
     for (const song of songs) {
-      // Use overall readiness as proxy
       map[song.id] = overallChoirReadiness
     }
     return map
   }, [songs, overallChoirReadiness])
 
-  const handleSendReminder = useCallback((chunkId: string) => {
-    // In production, this would call an API to send push/email notifications
-    alert('\u05EA\u05D6\u05DB\u05D5\u05E8\u05EA \u05E0\u05E9\u05DC\u05D7\u05D4!')
-  }, [])
+  // handleSendReminder removed — needs real push notification infrastructure
 
   // ---- Render ----
   if (loading) return <LoadingSkeleton />
@@ -403,44 +373,13 @@ export default function DirectorPage() {
             </h2>
           }
         >
-          {troubleSpots.length === 0 ? (
-            <div className="py-4 text-center">
-              <span className="text-3xl" role="img" aria-hidden="true">
-                {'\u2705'}
-              </span>
-              <p className="mt-2 text-text-muted">
-                {'\u05D0\u05D9\u05DF \u05E0\u05E7\u05D5\u05D3\u05D5\u05EA \u05EA\u05D5\u05E8\u05E4\u05D4 \u05DB\u05E8\u05D2\u05E2'}
-              </p>
-            </div>
-          ) : (
-            <ul className="divide-y divide-border">
-              {troubleSpots.map((spot) => (
-                <li
-                  key={spot.chunkId}
-                  className="flex items-center justify-between gap-3 py-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground truncate">
-                      {spot.songTitle}
-                    </p>
-                    <p className="text-xs text-text-muted">
-                      {spot.chunkLabel} &middot;{' '}
-                      <span className="text-danger tabular-nums" dir="ltr">
-                        {spot.readiness}%
-                      </span>
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleSendReminder(spot.chunkId)}
-                  >
-                    {'\u05E9\u05DC\u05D7 \u05EA\u05D6\u05DB\u05D5\u05E8\u05EA'}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
+          <div className="py-4 text-center">
+            <p className="text-sm text-text-muted">
+              {members.length === 0
+                ? '\u05D4\u05D6\u05DE\u05D9\u05E0\u05D5 \u05D7\u05D1\u05E8\u05D9\u05DD \u05DB\u05D3\u05D9 \u05DC\u05E8\u05D0\u05D5\u05EA \u05E0\u05EA\u05D5\u05E0\u05D9 \u05DE\u05D5\u05DB\u05E0\u05D5\u05EA'
+                : '\u05E0\u05E7\u05D5\u05D3\u05D5\u05EA \u05EA\u05D5\u05E8\u05E4\u05D4 \u05D9\u05D5\u05E4\u05D9\u05E2\u05D5 \u05DB\u05E9\u05D7\u05D1\u05E8\u05D9\u05DD \u05D9\u05EA\u05D7\u05D9\u05DC\u05D5 \u05DC\u05EA\u05E8\u05D2\u05DC'}
+            </p>
+          </div>
         </Card>
       </section>
 

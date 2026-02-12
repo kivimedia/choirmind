@@ -12,7 +12,9 @@
     "settings": "Settings",
     "profile": "Profile",
     "logout": "Log out",
-    "login": "Log in"
+    "login": "Log in",
+    "allChoirs": "All Choirs",
+    "manageChoir": "Manage Choir"
   },
   "auth": {
     "signIn": "Sign In",
@@ -34,7 +36,25 @@
     "alto": "Alto",
     "tenor": "Tenor",
     "baritone": "Baritone",
-    "bass": "Bass"
+    "bass": "Bass",
+    "mix": "Mix",
+    "playback": "Playback",
+    "full": "Full"
+  },
+  "audio": {
+    "player": "Audio Player",
+    "voicePart": "Voice Part",
+    "speed": "Speed",
+    "uploadAudio": "Upload Audio",
+    "dragDrop": "Drag audio files here or click to browse",
+    "fileTypes": "MP3, M4A, WAV, OGG — up to 50MB",
+    "uploading": "Uploading...",
+    "uploaded": "Uploaded",
+    "uploadError": "Upload error",
+    "deleteTrack": "Delete",
+    "noAudio": "No audio files",
+    "availableParts": "Available parts",
+    "audioSource": "Audio source"
   },
   "songs": {
     "title": "Song Library",
@@ -196,5 +216,30 @@
     "emotion": "What emotion does this section convey?",
     "image": "What image comes to mind when you sing this?",
     "connection": "How does this section connect to the previous one?"
+  },
+  "choirManage": {
+    "title": "Manage Choir",
+    "choirSettings": "Choir Settings",
+    "choirName": "Choir Name",
+    "inviteCode": "Invite Code",
+    "regenerateCode": "New Code",
+    "copied": "Copied!",
+    "locale": "Language",
+    "weekStart": "Week Start",
+    "sunday": "Sunday",
+    "monday": "Monday",
+    "saveSettings": "Save Settings",
+    "members": "Members",
+    "role": "Role",
+    "director": "Director",
+    "member": "Member",
+    "promote": "Promote to Director",
+    "demote": "Demote to Member",
+    "removeMember": "Remove from Choir",
+    "removeConfirm": "Remove {name} from the choir?",
+    "dangerZone": "Danger Zone",
+    "deleteChoir": "Delete Choir",
+    "deleteConfirm": "Delete this choir? This action cannot be undone.",
+    "saved": "Saved successfully"
   }
 }

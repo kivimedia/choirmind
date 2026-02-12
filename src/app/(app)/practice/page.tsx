@@ -6,6 +6,7 @@ import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
+import { useChoirStore } from '@/stores/useChoirStore'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,6 +55,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function PracticePage() {
   const router = useRouter()
+  const { activeChoirId } = useChoirStore()
   const [data, setData] = useState<PracticeData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -62,7 +64,8 @@ export default function PracticePage() {
     try {
       setLoading(true)
       setError(null)
-      const res = await fetch('/api/practice')
+      const params = activeChoirId ? `?choirId=${activeChoirId}` : ''
+      const res = await fetch(`/api/practice${params}`)
       if (!res.ok) throw new Error('Failed to fetch practice data')
       const json: PracticeData = await res.json()
       setData(json)
@@ -71,7 +74,7 @@ export default function PracticePage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [activeChoirId])
 
   useEffect(() => {
     fetchPracticeData()
@@ -101,11 +104,7 @@ export default function PracticePage() {
     )
   }
 
-  const { dueChunks = [], songs = [], stats } = data ?? {
-    dueChunks: [],
-    songs: [],
-    stats: { streak: 0, xp: 0, dueCount: 0 },
-  }
+  const { dueChunks = [], songs = [], stats = { streak: 0, xp: 0, dueCount: 0 } } = data ?? {}
 
   return (
     <div dir="rtl" className="w-full text-start">
@@ -113,7 +112,7 @@ export default function PracticePage() {
       <h1 className="text-2xl font-bold text-foreground mb-6">תרגול</h1>
 
       {/* Stats bar */}
-      <div className="grid grid-cols-3 gap-3 mb-8">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 mb-8">
         <Card className="text-center">
           <div className="text-2xl font-bold text-accent">{stats.streak}</div>
           <div className="text-xs text-text-muted">רצף ימים</div>

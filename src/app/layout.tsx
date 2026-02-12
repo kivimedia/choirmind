@@ -26,7 +26,7 @@ export default async function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="min-h-screen antialiased">
+      <body className="min-h-screen antialiased" suppressHydrationWarning>
         <NextIntlClientProvider messages={messages}>
           <Providers>
             {children}

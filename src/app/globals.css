@@ -56,7 +56,7 @@
 
 .word-placeholder {
   display: inline-block;
-  border-bottom: 2px dashed var(--color-border);
+  border-bottom: 2.5px dashed #666;
   min-width: 2ch;
 }
 

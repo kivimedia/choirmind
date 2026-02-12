@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -34,6 +34,7 @@ model User {
   practiceSessions        PracticeSession[]
   assignmentsCreated      Assignment[]        @relation("AssignedBy")
   achievements            UserAchievement[]
+  favoriteSongs           UserFavoriteSong[]
 }
 
 model Account {
@@ -112,9 +113,12 @@ model Song {
   personalUserId String? // owner if personal song
   spotifyTrackId String?
   spotifyEmbed   String?
+  youtubeVideoId String?
+  source        String?  // "mila", "manual", etc.
   targetDate    DateTime?
   concertOrder  Int?
   tags          String?  // JSON array stored as string
+  archivedAt    DateTime? // null = active, set = archived
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -122,6 +126,7 @@ model Song {
   chunks      Chunk[]
   audioTracks AudioTrack[]
   assignments Assignment[]
+  favoritedBy UserFavoriteSong[]
 }
 
 model Chunk {
@@ -132,6 +137,7 @@ model Chunk {
   order         Int
   lyrics        String  // Full lyrics text (UTF-8 with nikkud)
   textDirection String  @default("rtl")
+  lineTimestamps String? // JSON array of ms timestamps per line, e.g. "[0, 5200, 10400]"
   audioStartMs  Int?
   audioEndMs    Int?
   createdAt     DateTime @default(now())
@@ -143,8 +149,9 @@ model Chunk {
 model AudioTrack {
   id         String   @id @default(uuid())
   songId     String
-  voicePart  String   @default("full") // full, soprano, mezzo, alto, tenor, baritone, bass
+  voicePart  String   @default("full") // full, soprano, mezzo, alto, tenor, baritone, bass, mix, playback
   fileUrl    String
+  sourceUrl  String?  // original URL for scraper idempotency
   durationMs Int?
   uploadedAt DateTime @default(now())
 
@@ -208,4 +215,29 @@ model UserAchievement {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, achievement])
+}
+
+model EmailLog {
+  id         String   @id @default(uuid())
+  to         String
+  from       String
+  subject    String
+  status     String   // pending, sent, failed
+  resendId   String?  // Resend email ID if successful
+  error      String?  // Error message if failed
+  provider   String   @default("resend") // resend, test
+  context    String   @default("magic-link") // magic-link, test, etc.
+  createdAt  DateTime @default(now())
+}
+
+model UserFavoriteSong {
+  id        String   @id @default(uuid())
+  userId    String
+  songId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, songId])
 }
