@@ -384,7 +384,7 @@ export default function SongDetailPage() {
                     )}
                   </div>
                   <p
-                    className="whitespace-pre-line text-sm leading-relaxed text-foreground line-clamp-4"
+                    className="whitespace-pre-line text-sm leading-relaxed text-foreground"
                     dir={song.textDirection === 'rtl' ? 'rtl' : song.textDirection === 'ltr' ? 'ltr' : 'auto'}
                   >
                     {chunk.lyrics}

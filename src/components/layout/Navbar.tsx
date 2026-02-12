@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 import { useTranslations } from 'next-intl'
 import Button from '@/components/ui/Button'
@@ -10,6 +11,7 @@ import { useChoirStore } from '@/stores/useChoirStore'
 export default function Navbar() {
   const { data: session, status } = useSession()
   const t = useTranslations('nav')
+  const pathname = usePathname()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [choirMenuOpen, setChoirMenuOpen] = useState(false)
@@ -57,6 +59,11 @@ export default function Navbar() {
     { href: '/practice', label: t('practice') },
     { href: '/dashboard', label: t('dashboard') },
   ]
+
+  function isActive(href: string) {
+    if (href === '/') return pathname === '/'
+    return pathname === href || pathname.startsWith(href + '/')
+  }
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-surface/95 backdrop-blur-sm">
@@ -177,7 +184,12 @@ export default function Navbar() {
             <Link
               key={link.href}
               href={link.href}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover hover:text-primary"
+              className={[
+                'rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+                isActive(link.href)
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-foreground hover:bg-surface-hover hover:text-primary',
+              ].join(' ')}
             >
               {link.label}
             </Link>
@@ -185,7 +197,12 @@ export default function Navbar() {
           {(isDirector || isAdmin) && (
             <Link
               href="/director"
-              className="rounded-lg px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
+              className={[
+                'rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+                isActive('/director')
+                  ? 'bg-primary/10 text-primary font-semibold'
+                  : 'text-primary hover:bg-primary/10',
+              ].join(' ')}
             >
               {t('director')}
             </Link>
@@ -360,7 +377,12 @@ export default function Navbar() {
               <Link
                 key={link.href}
                 href={link.href}
-                className="rounded-lg px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover"
+                className={[
+                  'rounded-lg px-4 py-3 text-sm font-medium transition-colors',
+                  isActive(link.href)
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-foreground hover:bg-surface-hover',
+                ].join(' ')}
                 onClick={() => setMobileMenuOpen(false)}
               >
                 {link.label}
@@ -369,7 +391,12 @@ export default function Navbar() {
             {(isDirector || isAdmin) && (
               <Link
                 href="/director"
-                className="rounded-lg px-4 py-3 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
+                className={[
+                  'rounded-lg px-4 py-3 text-sm font-medium transition-colors',
+                  isActive('/director')
+                    ? 'bg-primary/10 text-primary font-semibold'
+                    : 'text-primary hover:bg-primary/10',
+                ].join(' ')}
                 onClick={() => setMobileMenuOpen(false)}
               >
                 {t('director')}
