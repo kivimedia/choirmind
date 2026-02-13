@@ -8,6 +8,7 @@ import SelfRatingButtons from '@/components/practice/SelfRatingButtons'
 import FadeLevelIndicator from '@/components/practice/FadeLevelIndicator'
 import PracticeSessionSummary from '@/components/practice/PracticeSessionSummary'
 import AudioPlayer from '@/components/audio/AudioPlayer'
+import type { AudioActions } from '@/components/audio/AudioPlayer'
 import Button from '@/components/ui/Button'
 import { getNextFadeLevel, type SelfRatingLabel } from '@/lib/fade-engine'
 import type { AudioTrackData, VoicePart } from '@/lib/audio/types'
@@ -82,6 +83,7 @@ export default function PracticeSessionPage() {
 
   // Session timing
   const sessionStartRef = useRef<Date>(new Date())
+  const audioActionsRef = useRef<AudioActions | null>(null)
 
   // Karaoke time tracking
   const [currentTimeMs, setCurrentTimeMs] = useState(0)
@@ -282,13 +284,17 @@ export default function PracticeSessionPage() {
   useEffect(() => {
     if (!song || isComplete) return
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'ArrowRight') {
+      if (e.key === ' ' || e.code === 'Space') {
+        const tag = (e.target as HTMLElement)?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
         e.preventDefault()
-        // In RTL context: right arrow = back 3s
+        const a = audioActionsRef.current
+        if (a) a.isPlaying ? a.pause() : a.play()
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
         setManualSeekMs(Math.max(0, currentTimeMs - 3000))
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
-        // In RTL context: left arrow = forward 3s
         setManualSeekMs(currentTimeMs + 3000)
       }
     }
@@ -478,6 +484,7 @@ export default function PracticeSessionPage() {
           spotifyTrackId={song.spotifyTrackId}
           onTimeUpdate={setCurrentTimeMs}
           seekToMs={manualSeekMs ?? seekTarget}
+          actionsRef={audioActionsRef}
         />
       </div>
 

@@ -123,6 +123,21 @@ export default function SongDetailPage() {
     if (songId) fetchSong()
   }, [songId, tCommon])
 
+  // Spacebar to pause/unpause audio
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === ' ' || e.code === 'Space') {
+        const tag = (e.target as HTMLElement)?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        e.preventDefault()
+        const a = audioActionsRef.current
+        if (a) a.isPlaying ? a.pause() : a.play()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   // Fetch vocal quota quietly
   useEffect(() => {
     async function fetchQuota() {

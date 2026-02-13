@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import Button from '@/components/ui/Button'
 import Select from '@/components/ui/Select'
@@ -10,6 +10,7 @@ import WordScramble from '@/components/games/WordScramble'
 import FillTheBlank from '@/components/games/FillTheBlank'
 import FinishTheLine from '@/components/games/FinishTheLine'
 import AudioPlayer from '@/components/audio/AudioPlayer'
+import type { AudioActions } from '@/components/audio/AudioPlayer'
 import KaraokeDisplay from '@/components/practice/KaraokeDisplay'
 import { calculateGameXP } from '@/lib/game-utils'
 import type { AudioTrackData } from '@/lib/audio/types'
@@ -66,6 +67,22 @@ export default function GamesPage() {
   } | null>(null)
   const [submittingScore, setSubmittingScore] = useState(false)
   const [currentTimeMs, setCurrentTimeMs] = useState(0)
+  const audioActionsRef = useRef<AudioActions | null>(null)
+
+  // Spacebar to pause/unpause audio
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === ' ' || e.code === 'Space') {
+        const tag = (e.target as HTMLElement)?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        e.preventDefault()
+        const a = audioActionsRef.current
+        if (a) a.isPlaying ? a.pause() : a.play()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   // -----------------------------------------------------------------------
   // Fetch song data + audio tracks
@@ -372,6 +389,7 @@ export default function GamesPage() {
             youtubeVideoId={song.youtubeVideoId}
             spotifyTrackId={song.spotifyTrackId}
             onTimeUpdate={setCurrentTimeMs}
+            actionsRef={audioActionsRef}
           />
         </div>
 
