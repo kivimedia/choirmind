@@ -39,7 +39,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!ALLOWED_CONTENT_TYPES.includes(contentType)) {
+    const baseType = contentType.split(';')[0].trim()
+    if (!ALLOWED_CONTENT_TYPES.includes(baseType)) {
       return NextResponse.json(
         { error: `Unsupported content type: ${contentType}. Allowed: ${ALLOWED_CONTENT_TYPES.join(', ')}` },
         { status: 400 },
