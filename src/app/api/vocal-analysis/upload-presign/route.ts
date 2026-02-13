@@ -13,8 +13,6 @@ const ALLOWED_CONTENT_TYPES = [
   'audio/mp4',
 ]
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB
-
 // POST /api/vocal-analysis/upload-presign
 // Body: { songId, voicePart, filename, contentType, durationMs }
 // Returns: { uploadUrl, key }
@@ -61,8 +59,7 @@ export async function POST(request: NextRequest) {
     const command = new PutObjectCommand({
       Bucket: S3_BUCKET,
       Key: key,
-      ContentType: contentType,
-      ContentLength: MAX_FILE_SIZE,
+      ContentType: baseType,
     })
 
     const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 300 })
@@ -70,6 +67,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ uploadUrl, key })
   } catch (error) {
     console.error('[vocal-analysis/upload-presign POST]', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    const msg = error instanceof Error ? error.message : 'Internal server error'
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
