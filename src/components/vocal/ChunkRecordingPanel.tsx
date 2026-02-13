@@ -154,28 +154,33 @@ export default function ChunkRecordingPanel({
   // Start recording — optionally play backing track
   const handleStartRecording = useCallback(async () => {
     setErrorMsg(null)
-    try {
-      await recorder.startRecording()
-    } catch {
-      setErrorMsg('לא ניתן להפעיל מיקרופון')
-      return
-    }
 
+    // Start backing track FIRST while still in user-gesture context
+    // (browsers block autoplay after async operations like getUserMedia)
     if (withBacking && audioActions && hasAudio) {
       if (chunk.audioStartMs != null) {
         audioActions.seekTo(chunk.audioStartMs)
       }
       audioActions.play()
     }
+
+    try {
+      await recorder.startRecording()
+    } catch {
+      // Recording failed — stop backing track if it started
+      if (withBacking && audioActions) audioActions.pause()
+      setErrorMsg('לא ניתן להפעיל מיקרופון')
+      return
+    }
+
     setStep('recording')
   }, [recorder, withBacking, audioActions, hasAudio, chunk.audioStartMs])
 
   // Stop recording — pause backing track
   const handleStopRecording = useCallback(() => {
     recorder.stopRecording()
-    if (audioActions?.isPlaying) {
-      audioActions.pause()
-    }
+    // Always call pause — isPlaying on the actions object is a stale snapshot
+    audioActions?.pause()
   }, [recorder, audioActions])
 
   // Upload + create job when blob is ready
@@ -466,6 +471,16 @@ export default function ChunkRecordingPanel({
             </svg>
             <p className="text-sm text-foreground">{'מנתח את הביצוע שלכם...'}</p>
             <p className="text-xs text-text-muted">{'בדרך כלל 10-30 שניות'}</p>
+            <button
+              onClick={() => {
+                if (pollRef.current) clearInterval(pollRef.current)
+                setStep('ready')
+                recorder.reset()
+              }}
+              className="mt-2 text-xs text-text-muted hover:text-foreground"
+            >
+              {'ביטול'}
+            </button>
           </div>
         )}
 

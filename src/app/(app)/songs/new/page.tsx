@@ -645,7 +645,7 @@ export default function NewSongPage() {
           <h3 className="text-sm font-semibold text-foreground">
             {t('autoChunk')} - {detectedChunks.length} קטעים זוהו
           </h3>
-          <div className="space-y-2">
+          <div className="max-h-60 space-y-2 overflow-y-auto rounded-lg border border-border/40 p-2">
             {detectedChunks.map((chunk, index) => (
               <Card key={index} className="!p-3">
                 <div className="flex items-start gap-3">
@@ -994,7 +994,7 @@ export default function NewSongPage() {
       )}
 
       {/* Action buttons */}
-      <div className="flex items-center justify-end gap-3">
+      <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-border/40 bg-background py-4">
         <Button
           variant="ghost"
           onClick={() => router.push('/songs')}
