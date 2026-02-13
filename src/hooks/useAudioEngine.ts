@@ -19,7 +19,12 @@ function getHowl() {
   if (typeof window === 'undefined') return null
   if (!HowlClass) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    HowlClass = require('howler').Howl
+    const howlerModule = require('howler')
+    HowlClass = howlerModule.Howl
+    // Increase HTML5 Audio pool to avoid "pool exhausted" when recording + playback overlap
+    if (howlerModule.Howler?.html5PoolSize !== undefined) {
+      howlerModule.Howler.html5PoolSize = 30
+    }
   }
   return HowlClass
 }
