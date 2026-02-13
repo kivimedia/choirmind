@@ -93,6 +93,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ job }, { status: 201 })
   } catch (error) {
     console.error('[vocal-analysis/jobs POST]', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    const msg = error instanceof Error ? error.message : 'Unknown error'
+    return NextResponse.json({ error: `Job creation failed: ${msg}` }, { status: 500 })
   }
 }

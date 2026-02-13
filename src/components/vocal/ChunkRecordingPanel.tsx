@@ -157,7 +157,8 @@ export default function ChunkRecordingPanel({
       setStep('uploading')
       try {
         const blob = recorder.audioBlob!
-        const ext = blob.type.includes('webm') ? 'webm' : 'mp4'
+        const baseType = blob.type.split(';')[0].trim()
+        const ext = baseType.includes('webm') ? 'webm' : 'mp4'
 
         // Get presigned URL with timeout
         const presignRes = await fetch('/api/vocal-analysis/upload-presign', {
@@ -174,18 +175,18 @@ export default function ChunkRecordingPanel({
         })
         if (!presignRes.ok) {
           const errData = await presignRes.json().catch(() => ({}))
-          throw new Error(errData.error || 'שגיאה בהכנת ההעלאה')
+          throw new Error(errData.error || `Presign failed (${presignRes.status})`)
         }
         const { uploadUrl, key } = await presignRes.json()
 
-        // Upload to S3 with timeout
+        // Upload to S3
         const uploadRes = await fetch(uploadUrl, {
           method: 'PUT',
           body: blob,
-          headers: { 'Content-Type': blob.type },
+          headers: { 'Content-Type': baseType },
           signal: controller.signal,
         })
-        if (!uploadRes.ok) throw new Error('שגיאה בהעלאת הקובץ')
+        if (!uploadRes.ok) throw new Error(`S3 upload failed (${uploadRes.status})`)
 
         // Create analysis job
         const jobRes = await fetch('/api/vocal-analysis/jobs', {
@@ -202,7 +203,7 @@ export default function ChunkRecordingPanel({
         })
         if (!jobRes.ok) {
           const err = await jobRes.json().catch(() => ({}))
-          throw new Error(err.error || 'שגיאה ביצירת הניתוח')
+          throw new Error(err.error || `Job failed (${jobRes.status})`)
         }
         const job = await jobRes.json()
         setJobId(job.id)
