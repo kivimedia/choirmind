@@ -855,7 +855,7 @@ export default function SongsPage() {
                           <span
                             key={part}
                             title={tVoiceParts.has(part as any) ? tVoiceParts(part as any) : part}
-                            className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary-dark"
+                            className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-[12px] font-semibold text-primary-dark"
                           >
                             {shortLabels[part] ?? part}
                           </span>
@@ -1128,7 +1128,7 @@ export default function SongsPage() {
                             <span className="text-xs text-text-muted">- {result.artist}</span>
                           )}
                         </div>
-                        <span className="rounded-full bg-surface-hover px-2 py-0.5 text-[10px] font-medium text-text-muted">
+                        <span className="rounded-full bg-surface-hover px-2 py-0.5 text-[12px] font-medium text-text-muted">
                           {result.source}
                         </span>
                       </div>

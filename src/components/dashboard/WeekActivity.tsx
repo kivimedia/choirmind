@@ -28,7 +28,7 @@ export default function WeekActivity({ days }: WeekActivityProps) {
               ].join(' ')}
               title={day.date}
             />
-            <span className="text-[10px] text-text-muted">{dayName}</span>
+            <span className="text-[12px] text-text-muted">{dayName}</span>
           </div>
         )
       })}

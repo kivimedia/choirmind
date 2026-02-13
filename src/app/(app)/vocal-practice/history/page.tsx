@@ -102,13 +102,13 @@ export default function VocalHistoryPage() {
                       })}
                     </p>
                     <div className="flex gap-3 mt-1">
-                      <span className="text-[11px] text-text-muted">
+                      <span className="text-[13px] text-text-muted">
                         {'גובה'} {Math.round(s.pitchScore)}
                       </span>
-                      <span className="text-[11px] text-text-muted">
+                      <span className="text-[13px] text-text-muted">
                         {'תזמון'} {Math.round(s.timingScore)}
                       </span>
-                      <span className="text-[11px] text-text-muted">
+                      <span className="text-[13px] text-text-muted">
                         {'דינמיקה'} {Math.round(s.dynamicsScore)}
                       </span>
                     </div>

@@ -444,7 +444,7 @@ export default function PracticeSessionPage() {
             </svg>
             {showFullLyrics ? 'מילים מלאות' : 'הצג הכל'}
             {isFirstTime && !showFullLyrics && manualFadeOverride === null && (
-              <span className="text-[10px] opacity-70">(ראשונה)</span>
+              <span className="text-[12px] opacity-70">(ראשונה)</span>
             )}
           </button>
 

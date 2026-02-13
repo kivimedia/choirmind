@@ -182,7 +182,7 @@ export default function AudioPlayer({
                 style={{ left: 0, width: `${progress}%` }}
               />
             </div>
-            <div className="flex justify-between text-[10px] text-text-muted tabular-nums">
+            <div className="flex justify-between text-[12px] text-text-muted tabular-nums">
               <span>{formatTime(engine.currentTimeMs)}</span>
               <span>{formatTime(engine.durationMs)}</span>
             </div>

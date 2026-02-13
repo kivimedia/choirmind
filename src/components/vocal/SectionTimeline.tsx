@@ -40,7 +40,7 @@ export default function SectionTimeline({ sections, totalDurationMs }: SectionTi
             >
               {/* Tooltip on hover */}
               <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block z-10">
-                <div className="rounded bg-foreground px-2 py-1 text-[10px] text-surface whitespace-nowrap">
+                <div className="rounded bg-foreground px-2 py-1 text-[12px] text-surface whitespace-nowrap">
                   {section.label}: {Math.round(section.score)}
                 </div>
               </div>
@@ -53,7 +53,7 @@ export default function SectionTimeline({ sections, totalDurationMs }: SectionTi
         {sections.map((section, i) => (
           <div key={i} className="flex items-center gap-1">
             <div className={`h-2.5 w-2.5 rounded-sm ${sectionColor(section.score)}`} />
-            <span className="text-[11px] text-text-muted">
+            <span className="text-[13px] text-text-muted">
               {section.label} ({Math.round(section.score)})
             </span>
           </div>

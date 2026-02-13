@@ -155,7 +155,7 @@ export default function Navbar() {
                       )}
                       <span className="truncate">{choir.name}</span>
                       {choir.role === 'director' && (
-                        <span className="ms-auto text-[10px] font-medium text-primary/70">&#9733;</span>
+                        <span className="ms-auto text-[12px] font-medium text-primary/70">&#9733;</span>
                       )}
                     </button>
                   ))}

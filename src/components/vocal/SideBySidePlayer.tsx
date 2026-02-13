@@ -84,10 +84,10 @@ function TrackRow({
             />
           </div>
           <div className="flex justify-between mt-0.5">
-            <span className="text-[10px] text-text-muted tabular-nums" dir="ltr">
+            <span className="text-[12px] text-text-muted tabular-nums" dir="ltr">
               {formatSecs(currentTime)}
             </span>
-            <span className="text-[10px] text-text-muted tabular-nums" dir="ltr">
+            <span className="text-[12px] text-text-muted tabular-nums" dir="ltr">
               {formatSecs(duration)}
             </span>
           </div>

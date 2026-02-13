@@ -844,7 +844,7 @@ export default function EditSongPage() {
             {chunk.lineTimestamps && chunk.lineTimestamps.length > 0 && (
               <div className="rounded-lg bg-background border border-border/50 p-3 space-y-0.5">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">Timestamps</span>
+                  <span className="text-[12px] font-medium text-text-muted uppercase tracking-wider">Timestamps</span>
                   {audioTracks.length > 0 && (
                     <button
                       type="button"
@@ -857,7 +857,7 @@ export default function EditSongPage() {
                         }
                         seekPreview(chunk.lineTimestamps![0])
                       }}
-                      className="text-[10px] font-medium text-primary hover:underline"
+                      className="text-[12px] font-medium text-primary hover:underline"
                     >
                       {previewPlaying ? 'Playing' : 'Play'}
                     </button>
@@ -1114,7 +1114,7 @@ export default function EditSongPage() {
                         <span className="text-xs text-text-muted">- {result.artist}</span>
                       )}
                     </div>
-                    <span className="rounded-full bg-surface-hover px-2 py-0.5 text-[10px] font-medium text-text-muted">
+                    <span className="rounded-full bg-surface-hover px-2 py-0.5 text-[12px] font-medium text-text-muted">
                       {result.source}
                     </span>
                   </div>
