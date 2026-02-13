@@ -8,7 +8,6 @@ import ScoreBreakdown from './ScoreBreakdown'
 import CoachingTipCard from './CoachingTipCard'
 import SectionTimeline from './SectionTimeline'
 import { useVocalRecorder } from '@/hooks/useVocalRecorder'
-import { useHeadphoneDetection } from '@/hooks/useHeadphoneDetection'
 import type { AudioActions } from '@/components/audio/AudioPlayer'
 
 // ---------------------------------------------------------------------------
@@ -52,6 +51,7 @@ interface SessionResult {
   sectionScores: SectionScoreData[]
   problemAreas: ProblemArea[]
   isolatedVocalUrl?: string
+  isMock?: boolean
 }
 
 interface ChunkRecordingPanelProps {
@@ -108,6 +108,42 @@ function formatTime(ms: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Parse practice session into SessionResult
+// ---------------------------------------------------------------------------
+
+function parsePracticeSession(ps: Record<string, unknown>): SessionResult {
+  let sectionScores: SectionScoreData[] = []
+  let isolatedVocalUrl: string | undefined
+  let isMock = false
+  try {
+    const rawSections = ps.sectionScores ? JSON.parse(ps.sectionScores as string) : []
+    if (Array.isArray(rawSections)) {
+      sectionScores = rawSections
+    } else if (rawSections.sections) {
+      sectionScores = rawSections.sections
+      isolatedVocalUrl = rawSections.isolatedVocalUrl
+      isMock = !!rawSections.isMock
+    }
+  } catch {}
+
+  let problemAreas: ProblemArea[] = []
+  try { problemAreas = JSON.parse((ps.problemAreas as string) || '[]') } catch {}
+
+  return {
+    overallScore: ps.overallScore as number,
+    pitchScore: ps.pitchScore as number,
+    timingScore: ps.timingScore as number,
+    dynamicsScore: ps.dynamicsScore as number,
+    coachingTips: (() => { try { return JSON.parse((ps.coachingTips as string) || '[]') } catch { return [] } })(),
+    xpEarned: ps.xpEarned as number,
+    sectionScores,
+    problemAreas,
+    isolatedVocalUrl,
+    isMock,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -124,7 +160,6 @@ export default function ChunkRecordingPanel({
   backingTrackUrl,
 }: ChunkRecordingPanelProps) {
   const recorder = useVocalRecorder()
-  const { isHeadphones, isDetecting } = useHeadphoneDetection()
   const [step, setStep] = useState<Step>('ready')
   const [withBacking, setWithBacking] = useState(true)
 
@@ -132,12 +167,50 @@ export default function ChunkRecordingPanel({
   const [jobId, setJobId] = useState<string | null>(null)
   const [result, setResult] = useState<SessionResult | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [backingPlaying, setBackingPlaying] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   // Standalone Audio element for backing track (bypasses Howler pool issues)
   const backingRef = useRef<HTMLAudioElement | null>(null)
 
-  // Reset when modal opens/closes
+  // Preload backing track when modal opens (so it's ready to play instantly)
+  useEffect(() => {
+    if (!isOpen || !hasAudio || !backingTrackUrl) {
+      // Cleanup
+      if (backingRef.current) {
+        backingRef.current.pause()
+        backingRef.current.removeAttribute('src')
+        backingRef.current.load()
+        backingRef.current = null
+      }
+      setBackingPlaying(false)
+      return
+    }
+
+    const audio = new Audio()
+    audio.preload = 'auto'
+    audio.src = backingTrackUrl
+
+    audio.addEventListener('playing', () => setBackingPlaying(true))
+    audio.addEventListener('pause', () => setBackingPlaying(false))
+    audio.addEventListener('ended', () => setBackingPlaying(false))
+    audio.addEventListener('error', (e) => {
+      console.error('[ChunkRecording] Backing track error:', e, 'src:', backingTrackUrl)
+      setBackingPlaying(false)
+    })
+
+    backingRef.current = audio
+
+    return () => {
+      audio.pause()
+      audio.removeAttribute('src')
+      audio.load()
+      backingRef.current = null
+      setBackingPlaying(false)
+    }
+  }, [isOpen, hasAudio, backingTrackUrl])
+
+  // Reset when modal closes
   useEffect(() => {
     if (!isOpen) {
       setStep('ready')
@@ -147,11 +220,6 @@ export default function ChunkRecordingPanel({
       recorder.reset()
       if (pollRef.current) clearInterval(pollRef.current)
       if (abortRef.current) abortRef.current.abort()
-      // Stop backing track
-      if (backingRef.current) {
-        backingRef.current.pause()
-        backingRef.current = null
-      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
@@ -160,40 +228,35 @@ export default function ChunkRecordingPanel({
   const handleStartRecording = useCallback(async () => {
     setErrorMsg(null)
 
-    // Start backing track using a standalone Audio element (bypasses Howler pool issues)
-    // Must happen BEFORE getUserMedia to stay in user-gesture context
-    if (withBacking && hasAudio && backingTrackUrl) {
-      const audio = new Audio(backingTrackUrl)
-      backingRef.current = audio
-      // play() returns a promise — don't await it so we don't block recording
-      audio.play().catch((err) => {
-        console.warn('[ChunkRecording] Backing track failed:', err)
-        setErrorMsg('לא ניתן להפעיל מוזיקה ברקע')
-      })
+    // Play preloaded backing track — must happen BEFORE getUserMedia
+    // to stay within user-gesture context
+    if (withBacking && backingRef.current) {
+      backingRef.current.currentTime = 0
+      try {
+        await backingRef.current.play()
+      } catch (err) {
+        console.warn('[ChunkRecording] Backing track play failed:', err)
+        // Don't block recording — show a warning but continue
+        setErrorMsg('לא ניתן להפעיל מוזיקה ברקע — נסו ללחוץ שוב')
+      }
     }
 
     try {
       await recorder.startRecording()
     } catch {
       // Recording failed — stop backing track if it started
-      if (backingRef.current) {
-        backingRef.current.pause()
-        backingRef.current = null
-      }
+      if (backingRef.current) backingRef.current.pause()
       setErrorMsg('לא ניתן להפעיל מיקרופון')
       return
     }
 
     setStep('recording')
-  }, [recorder, withBacking, hasAudio, backingTrackUrl, chunk.audioStartMs])
+  }, [recorder, withBacking])
 
   // Stop recording — pause backing track
   const handleStopRecording = useCallback(() => {
     recorder.stopRecording()
-    if (backingRef.current) {
-      backingRef.current.pause()
-      backingRef.current = null
-    }
+    if (backingRef.current) backingRef.current.pause()
     audioActions?.pause()
   }, [recorder, audioActions])
 
@@ -250,33 +313,7 @@ export default function ChunkRecordingPanel({
         if (job.status === 'COMPLETED' && job.practiceSession) {
           const ps = job.practiceSession
 
-          // Parse sectionScores - could be JSON string with {sections, isolatedVocalUrl} or plain array
-          let sectionScores: SectionScoreData[] = []
-          let isolatedVocalUrl: string | undefined
-          try {
-            const rawSections = ps.sectionScores ? JSON.parse(ps.sectionScores) : []
-            if (Array.isArray(rawSections)) {
-              sectionScores = rawSections
-            } else if (rawSections.sections) {
-              sectionScores = rawSections.sections
-              isolatedVocalUrl = rawSections.isolatedVocalUrl
-            }
-          } catch {}
-
-          let problemAreas: ProblemArea[] = []
-          try { problemAreas = JSON.parse(ps.problemAreas || '[]') } catch {}
-
-          setResult({
-            overallScore: ps.overallScore,
-            pitchScore: ps.pitchScore,
-            timingScore: ps.timingScore,
-            dynamicsScore: ps.dynamicsScore,
-            coachingTips: JSON.parse(ps.coachingTips || '[]'),
-            xpEarned: ps.xpEarned,
-            sectionScores,
-            problemAreas,
-            isolatedVocalUrl,
-          })
+          setResult(parsePracticeSession(ps))
           setStep('results')
           return
         }
@@ -320,33 +357,7 @@ export default function ChunkRecordingPanel({
         if (job.status === 'COMPLETED' && job.practiceSession) {
           const ps = job.practiceSession
 
-          // Parse sectionScores - could be JSON string with {sections, isolatedVocalUrl} or plain array
-          let sectionScores: SectionScoreData[] = []
-          let isolatedVocalUrl: string | undefined
-          try {
-            const rawSections = ps.sectionScores ? JSON.parse(ps.sectionScores) : []
-            if (Array.isArray(rawSections)) {
-              sectionScores = rawSections
-            } else if (rawSections.sections) {
-              sectionScores = rawSections.sections
-              isolatedVocalUrl = rawSections.isolatedVocalUrl
-            }
-          } catch {}
-
-          let problemAreas: ProblemArea[] = []
-          try { problemAreas = JSON.parse(ps.problemAreas || '[]') } catch {}
-
-          setResult({
-            overallScore: ps.overallScore,
-            pitchScore: ps.pitchScore,
-            timingScore: ps.timingScore,
-            dynamicsScore: ps.dynamicsScore,
-            coachingTips: JSON.parse(ps.coachingTips || '[]'),
-            xpEarned: ps.xpEarned,
-            sectionScores,
-            problemAreas,
-            isolatedVocalUrl,
-          })
+          setResult(parsePracticeSession(ps))
           setStep('results')
           if (pollRef.current) clearInterval(pollRef.current)
         } else if (job.status === 'FAILED') {
@@ -436,9 +447,13 @@ export default function ChunkRecordingPanel({
             </p>
 
             {withBacking && hasAudio && (
-              <p className="text-xs text-text-muted">
-                {'מוזיקה מנגנת ברקע'}
+              <p className={`text-xs ${backingPlaying ? 'text-secondary' : 'text-text-muted'}`}>
+                {backingPlaying ? '♫ מוזיקה מנגנת ברקע' : 'מוזיקה ברקע — טוען...'}
               </p>
+            )}
+
+            {errorMsg && (
+              <p className="text-xs text-danger text-center">{errorMsg}</p>
             )}
 
             <button
@@ -499,6 +514,13 @@ export default function ChunkRecordingPanel({
         {/* ==================== Results ==================== */}
         {step === 'results' && result && (
           <div className="space-y-4">
+            {result.isMock && (
+              <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-center">
+                <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                  {'ניתוח דמו — שירות הניתוח הקולי לא זמין כרגע. הציונים אינם מבוססים על ההקלטה.'}
+                </p>
+              </div>
+            )}
             <div className="flex flex-col items-center gap-2">
               <ScoreDial score={result.overallScore} size="md" />
               <p className="text-xs text-text-muted">

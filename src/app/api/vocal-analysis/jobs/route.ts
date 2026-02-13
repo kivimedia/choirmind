@@ -77,7 +77,7 @@ async function generateMockResults(
       pitchScore: Math.round(pitch * 10) / 10,
       timingScore: Math.round(timing * 10) / 10,
       dynamicsScore: Math.round(dynamics * 10) / 10,
-      sectionScores: JSON.stringify(sectionScores),
+      sectionScores: JSON.stringify({ sections: sectionScores, isMock: true }),
       problemAreas: JSON.stringify(problemAreas),
       coachingTips: JSON.stringify([
         'נסו לשמור על נשימה יציבה לאורך כל הפסוק',
