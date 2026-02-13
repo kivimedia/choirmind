@@ -487,6 +487,14 @@ export default function SongDetailPage() {
           textDirection={song.textDirection}
           audioActions={audioActionsRef.current}
           hasAudio={hasAudio}
+          backingTrackUrl={
+            hasAudio
+              ? (song.audioTracks!.find((t) => t.voicePart === userVoicePart)
+                ?? song.audioTracks!.find((t) => ['mix', 'playback', 'full'].includes(t.voicePart))
+                ?? song.audioTracks![0]
+              )?.fileUrl ?? null
+              : null
+          }
         />
       )}
 

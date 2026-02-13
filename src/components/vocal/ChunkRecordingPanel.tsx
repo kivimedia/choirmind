@@ -64,6 +64,8 @@ interface ChunkRecordingPanelProps {
   textDirection: string
   audioActions?: AudioActions | null
   hasAudio: boolean
+  /** Direct URL of the backing track for standalone playback during recording. */
+  backingTrackUrl?: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +121,7 @@ export default function ChunkRecordingPanel({
   textDirection,
   audioActions,
   hasAudio,
+  backingTrackUrl,
 }: ChunkRecordingPanelProps) {
   const recorder = useVocalRecorder()
   const { isHeadphones, isDetecting } = useHeadphoneDetection()
@@ -136,6 +139,8 @@ export default function ChunkRecordingPanel({
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // Standalone Audio element for backing track (bypasses Howler pool issues)
+  const backingRef = useRef<HTMLAudioElement | null>(null)
 
   // Reset when modal opens/closes
   useEffect(() => {
@@ -147,6 +152,11 @@ export default function ChunkRecordingPanel({
       recorder.reset()
       if (pollRef.current) clearInterval(pollRef.current)
       if (abortRef.current) abortRef.current.abort()
+      // Stop backing track
+      if (backingRef.current) {
+        backingRef.current.pause()
+        backingRef.current = null
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
@@ -156,15 +166,15 @@ export default function ChunkRecordingPanel({
     setErrorMsg(null)
 
     // Start backing track FIRST while still in user-gesture context
-    // (browsers block autoplay after async operations like getUserMedia)
-    if (withBacking && hasAudio) {
-      if (!audioActions) {
-        console.warn('[ChunkRecording] audioActions is null — cannot play backing track')
-      } else {
-        if (chunk.audioStartMs != null) {
-          audioActions.seekTo(chunk.audioStartMs)
-        }
-        audioActions.play()
+    // Use standalone Audio element to avoid Howler pool exhaustion
+    if (withBacking && hasAudio && backingTrackUrl) {
+      try {
+        const audio = new Audio(backingTrackUrl)
+        audio.currentTime = (chunk.audioStartMs ?? 0) / 1000
+        await audio.play()
+        backingRef.current = audio
+      } catch (err) {
+        console.warn('[ChunkRecording] Backing track play failed:', err)
       }
     }
 
@@ -172,18 +182,24 @@ export default function ChunkRecordingPanel({
       await recorder.startRecording()
     } catch {
       // Recording failed — stop backing track if it started
-      if (withBacking && audioActions) audioActions.pause()
+      if (backingRef.current) {
+        backingRef.current.pause()
+        backingRef.current = null
+      }
       setErrorMsg('לא ניתן להפעיל מיקרופון')
       return
     }
 
     setStep('recording')
-  }, [recorder, withBacking, audioActions, hasAudio, chunk.audioStartMs])
+  }, [recorder, withBacking, hasAudio, backingTrackUrl, chunk.audioStartMs])
 
   // Stop recording — pause backing track
   const handleStopRecording = useCallback(() => {
     recorder.stopRecording()
-    // Always call pause — isPlaying on the actions object is a stale snapshot
+    if (backingRef.current) {
+      backingRef.current.pause()
+      backingRef.current = null
+    }
     audioActions?.pause()
   }, [recorder, audioActions])
 

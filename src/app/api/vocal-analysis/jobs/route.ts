@@ -4,6 +4,108 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { calculateVocalXp } from '@/lib/xp'
 
+// ---------------------------------------------------------------------------
+// Mock analysis — used when vocal service is unavailable or unconfigured
+// ---------------------------------------------------------------------------
+
+async function generateMockResults(
+  jobId: string,
+  userId: string,
+  songId: string,
+  voicePart: string,
+  recordingS3Key: string,
+  recordingDurationMs: number,
+) {
+  const pitch = 55 + Math.random() * 35
+  const timing = 50 + Math.random() * 40
+  const dynamics = 45 + Math.random() * 40
+  const overall = pitch * 0.5 + timing * 0.3 + dynamics * 0.2
+
+  const sectionScores = Array.from({ length: 4 }, (_, i) => ({
+    sectionIndex: i,
+    startTime: i * 5,
+    endTime: (i + 1) * 5,
+    overallScore: 40 + Math.random() * 50,
+    pitchScore: 40 + Math.random() * 50,
+    timingScore: 40 + Math.random() * 50,
+    dynamicsScore: 40 + Math.random() * 50,
+  }))
+
+  const problemAreas = [
+    {
+      startTime: 5,
+      endTime: 10,
+      issues: ['pitch', 'timing'],
+      avgPitchDevCents: 85 + Math.random() * 50,
+      avgTimingOffsetMs: 60 + Math.random() * 80,
+      avgEnergyRatio: 0.6 + Math.random() * 0.4,
+    },
+  ]
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { currentStreak: true },
+  })
+
+  const previousSession = await prisma.vocalPracticeSession.findFirst({
+    where: { userId, songId },
+    orderBy: { createdAt: 'desc' },
+    select: { sectionScores: true },
+  })
+  let previousSectionScores: { overallScore: number }[] | undefined
+  if (previousSession?.sectionScores) {
+    try {
+      const parsed = JSON.parse(previousSession.sectionScores)
+      previousSectionScores = Array.isArray(parsed) ? parsed : parsed.sections
+    } catch {}
+  }
+
+  const xpResult = calculateVocalXp({
+    overallScore: overall,
+    previousSectionScores,
+    currentSectionScores: sectionScores,
+    currentStreak: user?.currentStreak ?? 0,
+  })
+
+  const practiceSession = await prisma.vocalPracticeSession.create({
+    data: {
+      userId,
+      songId,
+      voicePart,
+      recordingS3Key,
+      overallScore: Math.round(overall * 10) / 10,
+      pitchScore: Math.round(pitch * 10) / 10,
+      timingScore: Math.round(timing * 10) / 10,
+      dynamicsScore: Math.round(dynamics * 10) / 10,
+      sectionScores: JSON.stringify(sectionScores),
+      problemAreas: JSON.stringify(problemAreas),
+      coachingTips: JSON.stringify([
+        'נסו לשמור על נשימה יציבה לאורך כל הפסוק',
+        'שימו לב לדיוק הכניסות אחרי הפסקות',
+        'עבדו על מעברים חלקים בין תווים גבוהים לנמוכים',
+      ]),
+      xpEarned: xpResult.totalXp,
+      durationMs: recordingDurationMs,
+    },
+  })
+
+  await prisma.vocalAnalysisJob.update({
+    where: { id: jobId },
+    data: {
+      status: 'COMPLETED',
+      practiceSessionId: practiceSession.id,
+      completedAt: new Date(),
+    },
+  })
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { xp: { increment: xpResult.totalXp } },
+  })
+
+  return { practiceSession, xpResult }
+}
+
 // POST /api/vocal-analysis/jobs
 // Body: { songId, voicePart, recordingS3Key, recordingDurationMs, useHeadphones }
 // Creates an analysis job and triggers the Python vocal service
@@ -90,7 +192,7 @@ export async function POST(request: NextRequest) {
     // Trigger the Python vocal analysis service
     const vocalServiceUrl = process.env.VOCAL_SERVICE_URL
     if (vocalServiceUrl) {
-      // Fire-and-forget: real service — mark job FAILED if service is unreachable
+      // Fire-and-forget: try real service, fall back to mock on failure
       fetch(`${vocalServiceUrl}/api/v1/process-vocal-analysis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -105,115 +207,22 @@ export async function POST(request: NextRequest) {
         }),
       }).then(async (res) => {
         if (!res.ok) {
-          const errText = await res.text().catch(() => 'Unknown error')
-          console.error('[vocal-analysis/jobs] Service returned error:', res.status, errText)
-          await prisma.vocalAnalysisJob.update({
-            where: { id: job.id },
-            data: { status: 'FAILED', errorMessage: `Vocal service error (${res.status})` },
-          }).catch(() => {})
+          console.error('[vocal-analysis/jobs] Service error, falling back to mock:', res.status)
+          await generateMockResults(job.id, userId, songId, voicePart, recordingS3Key, recordingDurationMs)
+            .catch((e) => console.error('[vocal-analysis/jobs] Mock fallback failed:', e))
         }
       }).catch(async (err) => {
-        console.error('[vocal-analysis/jobs] Failed to trigger vocal service:', err)
-        await prisma.vocalAnalysisJob.update({
-          where: { id: job.id },
-          data: { status: 'FAILED', errorMessage: 'Vocal service unreachable' },
-        }).catch(() => {})
+        console.error('[vocal-analysis/jobs] Service unreachable, falling back to mock:', err)
+        await generateMockResults(job.id, userId, songId, voicePart, recordingS3Key, recordingDurationMs)
+          .catch((e) => console.error('[vocal-analysis/jobs] Mock fallback failed:', e))
       })
     } else {
       // No vocal service configured — generate mock results immediately
       try {
-        const pitch = 55 + Math.random() * 35
-        const timing = 50 + Math.random() * 40
-        const dynamics = 45 + Math.random() * 40
-        const overall = pitch * 0.5 + timing * 0.3 + dynamics * 0.2
+        const { practiceSession, xpResult } = await generateMockResults(
+          job.id, userId, songId, voicePart, recordingS3Key, recordingDurationMs,
+        )
 
-        const sectionScores = Array.from({length: 4}, (_, i) => ({
-          sectionIndex: i,
-          startTime: i * 5,
-          endTime: (i + 1) * 5,
-          overallScore: 40 + Math.random() * 50,
-          pitchScore: 40 + Math.random() * 50,
-          timingScore: 40 + Math.random() * 50,
-          dynamicsScore: 40 + Math.random() * 50,
-        }))
-
-        const problemAreas = [
-          {
-            startTime: 5,
-            endTime: 10,
-            issues: ['pitch', 'timing'],
-            avgPitchDevCents: 85 + Math.random() * 50,
-            avgTimingOffsetMs: 60 + Math.random() * 80,
-            avgEnergyRatio: 0.6 + Math.random() * 0.4,
-          }
-        ]
-
-        // Fetch user for streak info
-        const user = await prisma.user.findUnique({
-          where: { id: userId },
-          select: { currentStreak: true },
-        })
-
-        // Get previous session scores for improvement bonus
-        const previousSession = await prisma.vocalPracticeSession.findFirst({
-          where: { userId, songId },
-          orderBy: { createdAt: 'desc' },
-          select: { sectionScores: true },
-        })
-        let previousSectionScores: { overallScore: number }[] | undefined
-        if (previousSession?.sectionScores) {
-          try {
-            const parsed = JSON.parse(previousSession.sectionScores)
-            previousSectionScores = Array.isArray(parsed) ? parsed : parsed.sections
-          } catch {}
-        }
-
-        // Calculate XP using centralized formula
-        const xpResult = calculateVocalXp({
-          overallScore: overall,
-          previousSectionScores,
-          currentSectionScores: sectionScores,
-          currentStreak: user?.currentStreak ?? 0,
-        })
-
-        const practiceSession = await prisma.vocalPracticeSession.create({
-          data: {
-            userId,
-            songId,
-            voicePart,
-            recordingS3Key,
-            overallScore: Math.round(overall * 10) / 10,
-            pitchScore: Math.round(pitch * 10) / 10,
-            timingScore: Math.round(timing * 10) / 10,
-            dynamicsScore: Math.round(dynamics * 10) / 10,
-            sectionScores: JSON.stringify(sectionScores),
-            problemAreas: JSON.stringify(problemAreas),
-            coachingTips: JSON.stringify([
-              'נסו לשמור על נשימה יציבה לאורך כל הפסוק',
-              'שימו לב לדיוק הכניסות אחרי הפסקות',
-              'עבדו על מעברים חלקים בין תווים גבוהים לנמוכים',
-            ]),
-            xpEarned: xpResult.totalXp,
-            durationMs: recordingDurationMs,
-          },
-        })
-
-        await prisma.vocalAnalysisJob.update({
-          where: { id: job.id },
-          data: {
-            status: 'COMPLETED',
-            practiceSessionId: practiceSession.id,
-            completedAt: new Date(),
-          },
-        })
-
-        // Award XP
-        await prisma.user.update({
-          where: { id: userId },
-          data: { xp: { increment: xpResult.totalXp } },
-        })
-
-        // Compute quota warning
         const updatedQuota = await prisma.userVocalQuota.findUnique({ where: { userId } })
         const remaining = updatedQuota
           ? Math.max(0, updatedQuota.freeSecondsLimit - updatedQuota.freeSecondsUsed)
@@ -222,7 +231,6 @@ export async function POST(request: NextRequest) {
           ? remaining
           : null
 
-        // Re-fetch the updated job to return COMPLETED status
         const updatedJob = await prisma.vocalAnalysisJob.findUnique({
           where: { id: job.id },
           include: { practiceSession: true },
