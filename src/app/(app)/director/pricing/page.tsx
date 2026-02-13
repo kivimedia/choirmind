@@ -49,7 +49,7 @@ export default function DirectorPricingPage() {
               $0 <span className="text-sm font-normal text-text-muted">/ חודש</span>
             </p>
             <ul className="space-y-2 text-sm text-text-muted">
-              <li>60 דקות ניתוח קולי לכל חבר</li>
+              <li>60 דקות חינם + חבילות דקות</li>
               <li>שינון טקסט ללא הגבלה</li>
               <li>משחקי זיכרון</li>
               <li>לוח מוכנות בסיסי</li>

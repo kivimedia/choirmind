@@ -30,15 +30,15 @@ export async function POST(request: NextRequest) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session
         const userId = session.metadata?.userId
-        if (!userId || !session.subscription) break
+        if (!userId) break
 
-        const subscription = await getStripe().subscriptions.retrieve(session.subscription as string)
         const subscriptionType = session.metadata?.type
 
         if (subscriptionType === 'choir') {
-          // Choir subscription
+          // Choir subscription (director) — keep existing logic
           const choirId = session.metadata?.choirId
-          if (choirId) {
+          if (choirId && session.subscription) {
+            const subscription = await getStripe().subscriptions.retrieve(session.subscription as string)
             await prisma.choir.update({
               where: { id: choirId },
               data: {
@@ -47,21 +47,46 @@ export async function POST(request: NextRequest) {
               },
             })
           }
-        } else {
-          // Individual vocal subscription
+        } else if (subscriptionType === 'topup') {
+          // One-time top-up purchase
+          const seconds = parseInt(session.metadata?.seconds || '0', 10)
+          if (seconds > 0) {
+            await prisma.userVocalQuota.upsert({
+              where: { userId },
+              create: {
+                userId,
+                freeSecondsUsed: 0,
+                freeSecondsLimit: 3600,
+                purchasedSeconds: seconds,
+              },
+              update: {
+                purchasedSeconds: { increment: seconds },
+              },
+            })
+          }
+        } else if (session.subscription) {
+          // Plan subscription (starter/pro/studio)
+          const plan = session.metadata?.plan
+          const monthlySeconds = parseInt(session.metadata?.monthlySeconds || '0', 10)
+          const subscription = await getStripe().subscriptions.retrieve(session.subscription as string)
+
           await prisma.userVocalQuota.upsert({
             where: { userId },
             create: {
               userId,
               freeSecondsUsed: 0,
               freeSecondsLimit: 3600,
-              subscriptionTier: 'premium',
+              plan: plan || null,
+              monthlySecondsLimit: monthlySeconds,
+              purchasedSeconds: monthlySeconds, // first month's credits
               stripeSubscriptionId: subscription.id,
               stripeCurrentPeriodEnd: new Date((subscription as unknown as { current_period_end: number }).current_period_end * 1000),
               stripePriceId: subscription.items.data[0]?.price.id,
             },
             update: {
-              subscriptionTier: 'premium',
+              plan: plan || null,
+              monthlySecondsLimit: monthlySeconds,
+              purchasedSeconds: { increment: monthlySeconds }, // first month's credits
               stripeSubscriptionId: subscription.id,
               stripeCurrentPeriodEnd: new Date((subscription as unknown as { current_period_end: number }).current_period_end * 1000),
               stripePriceId: subscription.items.data[0]?.price.id,
@@ -72,9 +97,14 @@ export async function POST(request: NextRequest) {
       }
 
       case 'invoice.paid': {
+        // Subscription renewal — add monthly rollover credits
         const invoice = event.data.object as Stripe.Invoice
         const invoiceSubId = (invoice as unknown as { subscription: string | null }).subscription
         if (!invoiceSubId) break
+
+        // Skip the first invoice (already handled by checkout.session.completed)
+        const billingReason = (invoice as unknown as { billing_reason: string | null }).billing_reason
+        if (billingReason === 'subscription_create') break
 
         const subscription = await getStripe().subscriptions.retrieve(invoiceSubId)
         const customerId = invoice.customer as string
@@ -85,11 +115,17 @@ export async function POST(request: NextRequest) {
         })
         if (!user) break
 
+        const quota = await prisma.userVocalQuota.findUnique({
+          where: { userId: user.id },
+        })
+        if (!quota || !quota.monthlySecondsLimit) break
+
+        // Rollover: add monthly credits to purchased pool
         await prisma.userVocalQuota.update({
           where: { userId: user.id },
           data: {
+            purchasedSeconds: { increment: quota.monthlySecondsLimit },
             stripeCurrentPeriodEnd: new Date((subscription as unknown as { current_period_end: number }).current_period_end * 1000),
-            subscriptionTier: 'premium',
           },
         })
         break
@@ -114,7 +150,7 @@ export async function POST(request: NextRequest) {
           break
         }
 
-        // Otherwise, it's an individual subscription
+        // Individual plan cancellation — keep purchased minutes, clear plan
         const user = await prisma.user.findFirst({
           where: { stripeCustomerId: customerId },
           select: { id: true },
@@ -124,10 +160,12 @@ export async function POST(request: NextRequest) {
         await prisma.userVocalQuota.update({
           where: { userId: user.id },
           data: {
-            subscriptionTier: null,
+            plan: null,
+            monthlySecondsLimit: 0,
             stripeSubscriptionId: null,
             stripeCurrentPeriodEnd: null,
             stripePriceId: null,
+            // Do NOT clear purchasedSeconds — user keeps accumulated minutes
           },
         })
         break

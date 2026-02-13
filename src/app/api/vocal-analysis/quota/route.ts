@@ -28,16 +28,32 @@ export async function GET() {
       })
     }
 
-    const isSubscribed = !!(quota.stripeCurrentPeriodEnd
-      && new Date(quota.stripeCurrentPeriodEnd) > new Date())
+    // Check choir subscription
+    const choirMemberships = await prisma.choirMember.findMany({
+      where: { userId },
+      select: {
+        choir: {
+          select: { stripeCurrentPeriodEnd: true },
+        },
+      },
+    })
+    const hasChoirSubscription = choirMemberships.some(
+      (m) => m.choir.stripeCurrentPeriodEnd && new Date(m.choir.stripeCurrentPeriodEnd) > new Date()
+    )
+
+    const totalAllowance = quota.freeSecondsLimit + (quota.purchasedSeconds ?? 0)
+    const totalRemaining = Math.max(0, totalAllowance - quota.freeSecondsUsed)
 
     return NextResponse.json({
       freeSecondsUsed: quota.freeSecondsUsed,
       freeSecondsLimit: quota.freeSecondsLimit,
-      freeSecondsRemaining: Math.max(0, quota.freeSecondsLimit - quota.freeSecondsUsed),
-      subscriptionTier: quota.subscriptionTier,
-      subscriptionExpiresAt: quota.subscriptionExpiresAt ?? quota.stripeCurrentPeriodEnd,
-      isSubscribed,
+      purchasedSeconds: quota.purchasedSeconds ?? 0,
+      totalAllowance,
+      totalRemaining,
+      plan: quota.plan ?? null,
+      monthlySecondsLimit: quota.monthlySecondsLimit ?? 0,
+      hasChoirSubscription,
+      canTopUp: true,
     })
   } catch (error) {
     console.error('[vocal-analysis/quota GET]', error)

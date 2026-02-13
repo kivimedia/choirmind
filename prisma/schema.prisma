@@ -347,6 +347,9 @@ model UserVocalQuota {
   userId                 String    @unique
   freeSecondsUsed        Int       @default(0)
   freeSecondsLimit       Int       @default(3600)
+  purchasedSeconds       Int       @default(0)
+  monthlySecondsLimit    Int       @default(0)
+  plan                   String?
   subscriptionTier       String?
   subscriptionExpiresAt  DateTime?
   stripeSubscriptionId   String?

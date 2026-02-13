@@ -42,31 +42,25 @@ export async function POST(request: NextRequest) {
 
     const recordingSeconds = Math.ceil(recordingDurationMs / 1000)
 
-    // Check if user has active individual subscription (skip free limit)
-    const hasIndividualSub = quota.stripeCurrentPeriodEnd
-      && new Date(quota.stripeCurrentPeriodEnd) > new Date()
-
-    // Check if user's choir has active subscription
-    let hasChoirSub = false
-    if (!hasIndividualSub) {
-      const choirMemberships = await prisma.choirMember.findMany({
-        where: { userId },
-        select: {
-          choir: {
-            select: { stripeCurrentPeriodEnd: true },
-          },
+    // Check if user's choir has active subscription (unlimited)
+    const choirMemberships = await prisma.choirMember.findMany({
+      where: { userId },
+      select: {
+        choir: {
+          select: { stripeCurrentPeriodEnd: true },
         },
-      })
-      hasChoirSub = choirMemberships.some(
-        (m) => m.choir.stripeCurrentPeriodEnd && new Date(m.choir.stripeCurrentPeriodEnd) > new Date()
-      )
-    }
+      },
+    })
+    const hasChoirSub = choirMemberships.some(
+      (m) => m.choir.stripeCurrentPeriodEnd && new Date(m.choir.stripeCurrentPeriodEnd) > new Date()
+    )
 
-    const hasSubscription = hasIndividualSub || hasChoirSub
+    // Credit-based quota: free seconds + purchased seconds (from subscription + top-ups)
+    const totalAllowance = quota.freeSecondsLimit + (quota.purchasedSeconds ?? 0)
 
-    if (!hasSubscription && quota.freeSecondsUsed + recordingSeconds > quota.freeSecondsLimit) {
+    if (!hasChoirSub && quota.freeSecondsUsed + recordingSeconds > totalAllowance) {
       return NextResponse.json(
-        { error: '\u05D7\u05E8\u05D9\u05D2\u05EA \u05DE\u05DB\u05E1\u05D4 \u2014 \u05E0\u05D2\u05DE\u05E8 \u05D4\u05D6\u05DE\u05DF \u05D4\u05D7\u05D9\u05E0\u05DE\u05D9 \u05DC\u05E0\u05D9\u05EA\u05D5\u05D7 \u05E7\u05D5\u05DC\u05D9', requiresUpgrade: true },
+        { error: '\u05D7\u05E8\u05D9\u05D2\u05EA \u05DE\u05DB\u05E1\u05D4 \u2014 \u05E0\u05D2\u05DE\u05E8 \u05D4\u05D6\u05DE\u05DF \u05DC\u05E0\u05D9\u05EA\u05D5\u05D7 \u05E7\u05D5\u05DC\u05D9', requiresUpgrade: true },
         { status: 402 },
       )
     }
