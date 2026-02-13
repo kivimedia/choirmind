@@ -22,6 +22,13 @@ function formatTime(ms: number): string {
 // Props
 // ---------------------------------------------------------------------------
 
+export interface AudioActions {
+  play: () => void
+  pause: () => void
+  seekTo: (ms: number) => void
+  isPlaying: boolean
+}
+
 interface AudioPlayerProps {
   audioTracks: AudioTrackData[]
   userVoicePart?: VoicePart | null
@@ -31,6 +38,8 @@ interface AudioPlayerProps {
   onTimeUpdate?: (ms: number) => void
   /** Seek to a specific time externally (e.g., when changing chunks). */
   seekToMs?: number | null
+  /** Ref that gets set to audio control actions for external use. */
+  actionsRef?: React.MutableRefObject<AudioActions | null>
   locale?: string
   className?: string
 }
@@ -46,6 +55,7 @@ export default function AudioPlayer({
   spotifyTrackId,
   onTimeUpdate,
   seekToMs,
+  actionsRef,
   locale = 'he',
   className,
 }: AudioPlayerProps) {
@@ -58,6 +68,18 @@ export default function AudioPlayer({
     youtubeVideoId,
     spotifyTrackId,
     onTimeUpdate,
+  })
+
+  // Expose engine actions to parent via ref
+  useEffect(() => {
+    if (actionsRef) {
+      actionsRef.current = {
+        play: engine.play,
+        pause: engine.pause,
+        seekTo: engine.seekTo,
+        isPlaying: engine.isPlaying,
+      }
+    }
   })
 
   // Handle external seek requests

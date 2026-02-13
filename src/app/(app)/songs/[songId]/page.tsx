@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useTranslations } from 'next-intl'
@@ -11,7 +11,10 @@ import Badge from '@/components/ui/Badge'
 import ProgressBar from '@/components/ui/ProgressBar'
 import Modal from '@/components/ui/Modal'
 import AudioPlayer from '@/components/audio/AudioPlayer'
+import type { AudioActions } from '@/components/audio/AudioPlayer'
 import type { AudioTrackData, VoicePart } from '@/lib/audio/types'
+import ChunkRecordingPanel from '@/components/vocal/ChunkRecordingPanel'
+import VocalQuotaBanner from '@/components/vocal/VocalQuotaBanner'
 
 interface Chunk {
   id: string
@@ -49,6 +52,11 @@ interface Song {
   youtubeVideoId?: string | null
 }
 
+interface QuotaInfo {
+  freeSecondsUsed: number
+  freeSecondsLimit: number
+}
+
 type MemoryStatusVariant = 'fragile' | 'shaky' | 'developing' | 'solid' | 'locked' | 'default'
 
 function getStatusBadgeVariant(status?: string): MemoryStatusVariant {
@@ -79,7 +87,6 @@ export default function SongDetailPage() {
   const tGames = useTranslations('games')
   const tCommon = useTranslations('common')
   const tAudio = useTranslations('audio')
-  const tVoiceParts = useTranslations('voiceParts')
 
   const songId = params.songId as string
 
@@ -88,8 +95,14 @@ export default function SongDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [archiveModalOpen, setArchiveModalOpen] = useState(false)
   const [archiving, setArchiving] = useState(false)
+  const [recordingChunk, setRecordingChunk] = useState<Chunk | null>(null)
+  const [quota, setQuota] = useState<QuotaInfo | null>(null)
+
+  const audioActionsRef = useRef<AudioActions | null>(null)
 
   const isDirector = session?.user?.role === 'director'
+  const userVoicePart = (session?.user as any)?.voicePart ?? 'soprano'
+  const hasAudio = !!(song?.audioTracks && song.audioTracks.length > 0)
 
   useEffect(() => {
     async function fetchSong() {
@@ -109,6 +122,22 @@ export default function SongDetailPage() {
     }
     if (songId) fetchSong()
   }, [songId, tCommon])
+
+  // Fetch vocal quota quietly
+  useEffect(() => {
+    async function fetchQuota() {
+      try {
+        const res = await fetch('/api/vocal-analysis/quota')
+        if (res.ok) {
+          const data = await res.json()
+          setQuota(data)
+        }
+      } catch {
+        // Silent — quota display is optional
+      }
+    }
+    fetchQuota()
+  }, [])
 
   async function handleArchive() {
     setArchiving(true)
@@ -276,11 +305,6 @@ export default function SongDetailPage() {
             &#127918; {tGames('title')}
           </Button>
         </Link>
-        <Link href={`/vocal-practice/${songId}`}>
-          <Button variant="outline" size="lg">
-            &#127908; {'תרגול קולי'}
-          </Button>
-        </Link>
       </div>
 
       {/* Audio player: voice-part tracks preferred, YouTube/Spotify fallback */}
@@ -295,6 +319,7 @@ export default function SongDetailPage() {
           userVoicePart={(session?.user as any)?.voicePart as VoicePart | undefined}
           youtubeVideoId={song.youtubeVideoId}
           spotifyTrackId={song.spotifyTrackId}
+          actionsRef={audioActionsRef}
           locale={song.language === 'en' ? 'en' : 'he'}
         />
       ) : (
@@ -396,8 +421,19 @@ export default function SongDetailPage() {
                   </p>
                 </div>
 
-                {/* Memory status badge */}
-                <div className="shrink-0">
+                {/* Record button + Memory status */}
+                <div className="shrink-0 flex flex-col items-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRecordingChunk(chunk)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface text-text-muted transition-colors hover:bg-primary/10 hover:text-primary hover:border-primary/30"
+                    title="הקלטת קטע"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                      <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                    </svg>
+                  </button>
                   {chunk.memoryStatus ? (
                     <Badge variant={getStatusBadgeVariant(chunk.memoryStatus)}>
                       {getStatusLabel(chunk.memoryStatus)}
@@ -413,6 +449,31 @@ export default function SongDetailPage() {
           ))}
         </div>
       </div>
+
+      {/* Subtle vocal quota at bottom */}
+      {quota && (
+        <div className="text-center pt-2">
+          <VocalQuotaBanner
+            secondsUsed={quota.freeSecondsUsed}
+            secondsLimit={quota.freeSecondsLimit}
+          />
+        </div>
+      )}
+
+      {/* Chunk recording modal */}
+      {recordingChunk && (
+        <ChunkRecordingPanel
+          isOpen={!!recordingChunk}
+          onClose={() => setRecordingChunk(null)}
+          chunk={recordingChunk}
+          songId={songId}
+          songTitle={song.title}
+          voicePart={userVoicePart}
+          textDirection={song.textDirection}
+          audioActions={audioActionsRef.current}
+          hasAudio={hasAudio}
+        />
+      )}
 
       {/* Archive confirmation modal */}
       <Modal
