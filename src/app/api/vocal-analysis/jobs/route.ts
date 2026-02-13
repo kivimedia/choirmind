@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
     // Trigger the Python vocal analysis service
     const vocalServiceUrl = process.env.VOCAL_SERVICE_URL
     if (vocalServiceUrl) {
-      // Fire-and-forget: real service
+      // Fire-and-forget: real service — mark job FAILED if service is unreachable
       fetch(`${vocalServiceUrl}/api/v1/process-vocal-analysis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -103,8 +103,21 @@ export async function POST(request: NextRequest) {
           recordingDurationMs,
           useHeadphones: job.useHeadphones,
         }),
-      }).catch((err) => {
+      }).then(async (res) => {
+        if (!res.ok) {
+          const errText = await res.text().catch(() => 'Unknown error')
+          console.error('[vocal-analysis/jobs] Service returned error:', res.status, errText)
+          await prisma.vocalAnalysisJob.update({
+            where: { id: job.id },
+            data: { status: 'FAILED', errorMessage: `Vocal service error (${res.status})` },
+          }).catch(() => {})
+        }
+      }).catch(async (err) => {
         console.error('[vocal-analysis/jobs] Failed to trigger vocal service:', err)
+        await prisma.vocalAnalysisJob.update({
+          where: { id: job.id },
+          data: { status: 'FAILED', errorMessage: 'Vocal service unreachable' },
+        }).catch(() => {})
       })
     } else {
       // No vocal service configured — generate mock results immediately

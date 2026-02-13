@@ -1,6 +1,6 @@
 'use client'
 
-import { type ReactNode, useEffect, useCallback } from 'react'
+import { type ReactNode, useEffect, useCallback, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 
 interface ModalProps {
@@ -9,6 +9,8 @@ interface ModalProps {
   title?: string
   children: ReactNode
   className?: string
+  /** Allow dragging the modal by its header + resizing from the bottom-right corner. */
+  resizable?: boolean
 }
 
 export default function Modal({
@@ -17,6 +19,7 @@ export default function Modal({
   title,
   children,
   className = '',
+  resizable = false,
 }: ModalProps) {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -36,6 +39,41 @@ export default function Modal({
     }
   }, [isOpen, handleKeyDown])
 
+  // ── Drag state ──────────────────────────────────────────────
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const dragging = useRef(false)
+  const dragStart = useRef({ x: 0, y: 0 })
+
+  // Reset position when modal opens
+  useEffect(() => {
+    if (isOpen) setOffset({ x: 0, y: 0 })
+  }, [isOpen])
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (!resizable) return
+      // Only drag from the header area (not buttons)
+      if ((e.target as HTMLElement).closest('button')) return
+      dragging.current = true
+      dragStart.current = { x: e.clientX - offset.x, y: e.clientY - offset.y }
+      ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    },
+    [resizable, offset],
+  )
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragging.current) return
+    setOffset({
+      x: e.clientX - dragStart.current.x,
+      y: e.clientY - dragStart.current.y,
+    })
+  }, [])
+
+  const onPointerUp = useCallback(() => {
+    dragging.current = false
+  }, [])
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -53,22 +91,32 @@ export default function Modal({
 
           {/* Dialog */}
           <motion.div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-label={title}
             initial={{ opacity: 0, scale: 0.95, y: 12 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
+            animate={{ opacity: 1, scale: 1, y: resizable ? offset.y : 0, x: resizable ? offset.x : 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 12 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
+            transition={dragging.current ? { duration: 0 } : { duration: 0.2, ease: 'easeOut' }}
             className={[
               'relative z-10 w-full max-w-lg mx-4',
               'rounded-2xl border border-border bg-surface shadow-xl',
+              resizable ? 'resize overflow-hidden' : '',
               className,
             ].join(' ')}
           >
             {/* Header */}
             {title && (
-              <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <div
+                className={[
+                  'flex items-center justify-between border-b border-border px-6 py-4',
+                  resizable ? 'cursor-grab active:cursor-grabbing select-none' : '',
+                ].join(' ')}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+              >
                 <h2 className="text-lg font-semibold text-foreground text-start">
                   {title}
                 </h2>
@@ -122,7 +170,7 @@ export default function Modal({
             )}
 
             {/* Body */}
-            <div className="p-6">{children}</div>
+            <div className={resizable ? 'p-6 overflow-y-auto' : 'p-6'}>{children}</div>
           </motion.div>
         </div>
       )}

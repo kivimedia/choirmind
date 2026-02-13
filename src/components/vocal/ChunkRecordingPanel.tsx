@@ -157,11 +157,15 @@ export default function ChunkRecordingPanel({
 
     // Start backing track FIRST while still in user-gesture context
     // (browsers block autoplay after async operations like getUserMedia)
-    if (withBacking && audioActions && hasAudio) {
-      if (chunk.audioStartMs != null) {
-        audioActions.seekTo(chunk.audioStartMs)
+    if (withBacking && hasAudio) {
+      if (!audioActions) {
+        console.warn('[ChunkRecording] audioActions is null — cannot play backing track')
+      } else {
+        if (chunk.audioStartMs != null) {
+          audioActions.seekTo(chunk.audioStartMs)
+        }
+        audioActions.play()
       }
-      audioActions.play()
     }
 
     try {
@@ -355,11 +359,11 @@ export default function ChunkRecordingPanel({
   // ---------------------------------------------------------------------------
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`${chunk.label}`}>
+    <Modal isOpen={isOpen} onClose={onClose} title={`${chunk.label}`} resizable>
       <div className="space-y-4">
         {/* Chunk lyrics */}
         <div
-          className="rounded-lg bg-border/10 p-3 max-h-32 overflow-y-auto"
+          className="rounded-lg bg-border/10 p-3 max-h-48 overflow-y-auto"
           dir={textDirection === 'rtl' ? 'rtl' : textDirection === 'ltr' ? 'ltr' : 'auto'}
         >
           <p className="whitespace-pre-line text-sm leading-relaxed text-foreground">
