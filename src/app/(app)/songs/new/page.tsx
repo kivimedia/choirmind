@@ -643,7 +643,7 @@ export default function NewSongPage() {
       {detectedChunks.length > 0 && (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-foreground">
-            {t('autoChunk')} — {detectedChunks.length} קטעים זוהו
+            {t('autoChunk')} - {detectedChunks.length} קטעים זוהו
           </h3>
           <div className="space-y-2">
             {detectedChunks.map((chunk, index) => (
@@ -802,7 +802,7 @@ export default function NewSongPage() {
             placeholder="הזינו את שם השיר..."
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            dir="auto"
+            dir="rtl"
           />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -811,14 +811,14 @@ export default function NewSongPage() {
               placeholder="לחן"
               value={composer}
               onChange={(e) => setComposer(e.target.value)}
-              dir="auto"
+              dir="rtl"
             />
             <Input
               label={t('lyricist')}
               placeholder="מילים"
               value={lyricist}
               onChange={(e) => setLyricist(e.target.value)}
-              dir="auto"
+              dir="rtl"
             />
           </div>
 
@@ -919,7 +919,7 @@ export default function NewSongPage() {
               גררו קבצי שמע לכאן או לחצו לבחירה
             </p>
             <p className="text-xs text-text-muted">
-              MP3, M4A, WAV, OGG — עד 50MB
+              MP3, M4A, WAV, OGG - עד 50MB
             </p>
             <input
               ref={audioInputRef}
@@ -978,7 +978,7 @@ export default function NewSongPage() {
 
               {pendingAudioCount > 0 && (
                 <p className="text-xs text-text-muted">
-                  {pendingAudioCount} {pendingAudioCount === 1 ? 'קובץ ממתין' : 'קבצים ממתינים'} להעלאה — יועלו לאחר יצירת השיר
+                  {pendingAudioCount} {pendingAudioCount === 1 ? 'קובץ ממתין' : 'קבצים ממתינים'} להעלאה - יועלו לאחר יצירת השיר
                 </p>
               )}
             </div>

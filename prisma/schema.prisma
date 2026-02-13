@@ -35,6 +35,11 @@ model User {
   assignmentsCreated      Assignment[]        @relation("AssignedBy")
   achievements            UserAchievement[]
   favoriteSongs           UserFavoriteSong[]
+
+  // Vocal practice relations
+  vocalAnalysisJobs       VocalAnalysisJob[]
+  vocalPracticeSessions   VocalPracticeSession[]
+  vocalQuota              UserVocalQuota?
 }
 
 model Account {
@@ -127,6 +132,11 @@ model Song {
   audioTracks AudioTrack[]
   assignments Assignment[]
   favoritedBy UserFavoriteSong[]
+
+  // Vocal practice relations
+  referenceVocals        ReferenceVocal[]
+  vocalAnalysisJobs      VocalAnalysisJob[]
+  vocalPracticeSessions  VocalPracticeSession[]
 }
 
 model Chunk {
@@ -156,6 +166,9 @@ model AudioTrack {
   uploadedAt DateTime @default(now())
 
   song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  // Vocal practice relations
+  referenceVocals ReferenceVocal[]
 }
 
 model UserChunkProgress {
@@ -240,4 +253,93 @@ model UserFavoriteSong {
   song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
 
   @@unique([userId, songId])
+}
+
+// ---------------------------------------------------------------------------
+// Vocal Practice & Analysis Models
+// ---------------------------------------------------------------------------
+
+model ReferenceVocal {
+  id              String   @id @default(uuid())
+  songId          String
+  voicePart       String
+  sourceTrackId   String
+  isolatedFileUrl String?
+  featuresFileUrl String
+  durationMs      Int
+  demucsModel     String   @default("htdemucs_ft")
+  status          String   @default("PENDING") // PENDING, PROCESSING, READY, FAILED
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  song               Song                   @relation(fields: [songId], references: [id], onDelete: Cascade)
+  sourceTrack        AudioTrack             @relation(fields: [sourceTrackId], references: [id], onDelete: Cascade)
+  vocalPracticeSessions VocalPracticeSession[]
+
+  @@unique([songId, voicePart, sourceTrackId])
+  @@index([songId, voicePart, status])
+}
+
+model VocalAnalysisJob {
+  id                  String    @id @default(uuid())
+  userId              String
+  songId              String
+  voicePart           String
+  recordingS3Key      String
+  recordingDurationMs Int
+  useHeadphones       Boolean   @default(false)
+  status              String    @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  errorMessage        String?
+  attempts            Int       @default(0)
+  practiceSessionId   String?   @unique
+  createdAt           DateTime  @default(now())
+  startedAt           DateTime?
+  completedAt         DateTime?
+
+  user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  song            Song                  @relation(fields: [songId], references: [id], onDelete: Cascade)
+  practiceSession VocalPracticeSession? @relation(fields: [practiceSessionId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([userId, songId])
+}
+
+model VocalPracticeSession {
+  id               String   @id @default(uuid())
+  userId           String
+  songId           String
+  voicePart        String
+  recordingS3Key   String
+  referenceVocalId String?
+  overallScore     Float
+  pitchScore       Float
+  timingScore      Float
+  dynamicsScore    Float
+  sectionScores    String   // JSON array
+  problemAreas     String   // JSON array (max 3)
+  coachingTips     String   // JSON array of Hebrew strings
+  xpEarned         Int      @default(0)
+  durationMs       Int
+  createdAt        DateTime @default(now())
+
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  song           Song              @relation(fields: [songId], references: [id], onDelete: Cascade)
+  referenceVocal ReferenceVocal?   @relation(fields: [referenceVocalId], references: [id])
+  analysisJob    VocalAnalysisJob?
+
+  @@index([userId, songId, createdAt])
+}
+
+model UserVocalQuota {
+  id                    String    @id @default(uuid())
+  userId                String    @unique
+  freeSecondsUsed       Int       @default(0)
+  freeSecondsLimit      Int       @default(3600)
+  subscriptionTier      String?
+  subscriptionExpiresAt DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

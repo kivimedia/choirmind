@@ -1,63 +1,66 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
-import Link from 'next/link'
 import Card from '@/components/ui/Card'
-import Button from '@/components/ui/Button'
-import EmptyState from '@/components/ui/EmptyState'
-import SongReadinessCard from '@/components/dashboard/SongReadinessCard'
 import StatsCard from '@/components/dashboard/StatsCard'
+import SongReadinessCard from '@/components/dashboard/SongReadinessCard'
+import HeroCTA from '@/components/dashboard/HeroCTA'
+import WeekActivity from '@/components/dashboard/WeekActivity'
+import WeakestChunks from '@/components/dashboard/WeakestChunks'
+import ConcertCountdown from '@/components/dashboard/ConcertCountdown'
+import AchievementProgress from '@/components/dashboard/AchievementProgress'
+import { VocalQuotaCard, LastVocalScore } from '@/components/dashboard/VocalQuotaCard'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface ChunkData {
-  id: string
-  label: string
-  status: string
-  chunkType?: string
-  order?: number
+interface DashboardStats {
+  user: {
+    xp: number
+    currentStreak: number
+    longestStreak: number
+    lastPracticeDate: string | null
+  }
+  dueChunksCount: number
+  estimatedMinutes: number
+  songsCount: number
+  chunksTotal: number
+  chunksMastered: number
+  weakestChunks: {
+    chunkId: string
+    songTitle: string
+    chunkLabel: string
+    memoryStrength: number
+    status: string
+  }[]
+  recentAchievements: { achievement: string; unlockedAt: string }[]
+  nextMilestone: { achievement: string; progress: number; target: number } | null
+  concertCountdowns: {
+    songId: string
+    title: string
+    targetDate: string
+    readinessPercent: number
+  }[]
+  newAssignments: { songTitle: string; assignedBy: string; assignedAt: string }[]
+  weekActivity: { date: string; practiced: boolean }[]
+  vocalQuota: { secondsUsed: number; secondsLimit: number } | null
+  lastVocalScore: {
+    songTitle: string
+    voicePart: string
+    score: number
+    previousScore: number | null
+    date: string
+  } | null
+  userState: 'no_choir' | 'no_assignments' | 'never_practiced' | 'has_due' | 'caught_up'
 }
 
 interface SongData {
   id: string
   title: string
   composer?: string | null
-  chunks: ChunkData[]
-}
-
-interface PracticeQueueData {
-  count: number
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const STATUS_VALUE: Record<string, number> = {
-  fragile: 0,
-  shaky: 1,
-  developing: 2,
-  solid: 3,
-  locked_in: 4,
-  locked: 4,
-}
-
-function averageStatusPercent(chunks: ChunkData[]): number {
-  if (chunks.length === 0) return 0
-  const total = chunks.reduce((sum, c) => sum + (STATUS_VALUE[c.status] ?? 0), 0)
-  // Max possible = 4 per chunk
-  return Math.round((total / (chunks.length * 4)) * 100)
-}
-
-function solidPlusPercent(chunks: ChunkData[]): number {
-  if (chunks.length === 0) return 0
-  const solidCount = chunks.filter(
-    (c) => c.status === 'solid' || c.status === 'locked_in' || c.status === 'locked'
-  ).length
-  return Math.round((solidCount / chunks.length) * 100)
+  chunks: { id: string; label: string; status: string }[]
 }
 
 // ---------------------------------------------------------------------------
@@ -68,69 +71,16 @@ function LoadingSkeleton() {
   return (
     <div className="space-y-6 animate-pulse">
       <div className="h-8 w-48 rounded-lg bg-border/40" />
+      <div className="h-24 rounded-xl bg-border/30" />
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {[1, 2, 3, 4].map((i) => (
           <div key={i} className="h-24 rounded-xl bg-border/30" />
         ))}
       </div>
-      <div className="h-40 rounded-xl bg-border/30" />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {[1, 2].map((i) => (
           <div key={i} className="h-36 rounded-xl bg-border/30" />
         ))}
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Circular readiness display
-// ---------------------------------------------------------------------------
-
-function ReadinessCircle({ percent }: { percent: number }) {
-  const radius = 54
-  const circumference = 2 * Math.PI * radius
-  // RTL: progress fills clockwise from the right (use stroke-dashoffset)
-  const dashOffset = circumference - (circumference * percent) / 100
-
-  return (
-    <div className="flex flex-col items-center gap-2">
-      <div className="relative h-36 w-36">
-        <svg
-          className="h-full w-full -rotate-90"
-          viewBox="0 0 120 120"
-          aria-hidden="true"
-        >
-          {/* Background circle */}
-          <circle
-            cx="60"
-            cy="60"
-            r={radius}
-            fill="none"
-            stroke="currentColor"
-            className="text-border/40"
-            strokeWidth="10"
-          />
-          {/* Progress circle */}
-          <circle
-            cx="60"
-            cy="60"
-            r={radius}
-            fill="none"
-            stroke="currentColor"
-            className="text-primary transition-all duration-700 ease-out"
-            strokeWidth="10"
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={dashOffset}
-          />
-        </svg>
-        {/* Percentage text in the center */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-3xl font-bold text-foreground tabular-nums" dir="ltr">
-            {percent}%
-          </span>
-        </div>
       </div>
     </div>
   )
@@ -142,59 +92,42 @@ function ReadinessCircle({ percent }: { percent: number }) {
 
 export default function DashboardPage() {
   const { data: session } = useSession()
+  const [stats, setStats] = useState<DashboardStats | null>(null)
   const [songs, setSongs] = useState<SongData[]>([])
-  const [practiceQueue, setPracticeQueue] = useState<PracticeQueueData | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Mock stats that would normally come from an API
-  const [stats] = useState({
-    practiceStreak: 5,
-    totalXP: 1240,
-  })
-
-  // ---- Fetch data ----
   useEffect(() => {
     async function fetchAll() {
       try {
-        const [songsRes, practiceRes] = await Promise.allSettled([
+        const [statsRes, songsRes] = await Promise.allSettled([
+          fetch('/api/dashboard/stats'),
           fetch('/api/songs'),
-          fetch('/api/practice'),
         ])
+
+        if (statsRes.status === 'fulfilled' && statsRes.value.ok) {
+          const data = await statsRes.value.json()
+          setStats(data)
+        }
 
         if (songsRes.status === 'fulfilled' && songsRes.value.ok) {
           const data = await songsRes.value.json()
           const rawSongs = data.songs ?? []
-          // Map chunks: use userChunkProgress status if available, else default to 'fragile'
           const mapped: SongData[] = rawSongs.map(
             (s: Record<string, unknown> & { chunks?: Record<string, unknown>[] }) => ({
               id: s.id as string,
               title: s.title as string,
               composer: (s.composer as string) || null,
-              chunks: (s.chunks ?? []).map(
-                (c: Record<string, unknown>) => ({
-                  id: c.id as string,
-                  label: (c.label as string) || `\u05E7\u05D8\u05E2 ${c.order}`,
-                  status: (c.status as string) || 'fragile',
-                  chunkType: c.chunkType as string | undefined,
-                  order: c.order as number | undefined,
-                })
-              ),
+              chunks: (s.chunks ?? []).map((c: Record<string, unknown>) => ({
+                id: c.id as string,
+                label: (c.label as string) || `קטע ${c.order}`,
+                status: (c.status as string) || 'fragile',
+              })),
             })
           )
           setSongs(mapped)
         }
-
-        if (practiceRes.status === 'fulfilled' && practiceRes.value.ok) {
-          const data = await practiceRes.value.json()
-          setPracticeQueue({
-            count: data.count ?? data.reviewQueue?.length ?? 0,
-          })
-        } else {
-          setPracticeQueue({ count: 0 })
-        }
       } catch {
-        // Graceful fallback — show empty state
-        setPracticeQueue({ count: 0 })
+        // Graceful fallback
       } finally {
         setLoading(false)
       }
@@ -203,155 +136,174 @@ export default function DashboardPage() {
     fetchAll()
   }, [])
 
-  // ---- Derived data ----
-  const allChunks = useMemo(() => songs.flatMap((s) => s.chunks), [songs])
-
-  const overallReadiness = useMemo(
-    () => averageStatusPercent(allChunks),
-    [allChunks]
-  )
-
-  const totalSolidChunks = useMemo(
-    () =>
-      allChunks.filter(
-        (c) => c.status === 'solid' || c.status === 'locked_in' || c.status === 'locked'
-      ).length,
-    [allChunks]
-  )
-
-  // ---- Render ----
   if (loading) return <LoadingSkeleton />
 
+  // Streak-at-risk check
+  const streakAtRisk =
+    stats?.user.currentStreak &&
+    stats.user.currentStreak > 0 &&
+    stats.user.lastPracticeDate &&
+    new Date(stats.user.lastPracticeDate).toDateString() !== new Date().toDateString()
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Page header */}
       <div>
         <h1 className="text-2xl font-bold text-foreground sm:text-3xl">
-          {'\u05DC\u05D5\u05D7 \u05DE\u05D5\u05DB\u05E0\u05D5\u05EA'}
+          {'לוח מוכנות'}
         </h1>
         {session?.user?.name && (
           <p className="mt-1 text-text-muted">
-            {'\u05E9\u05DC\u05D5\u05DD'}, {session.user.name}
+            {'שלום'}, {session.user.name}
           </p>
         )}
       </div>
 
-      {/* ==================== Overall Readiness ==================== */}
-      <section aria-labelledby="readiness-heading">
-        <Card
-          header={
-            <h2 id="readiness-heading" className="text-lg font-semibold text-foreground">
-              {'\u05DE\u05D5\u05DB\u05E0\u05D5\u05EA \u05DB\u05DC\u05DC\u05D9\u05EA'}
-            </h2>
-          }
-        >
-          {songs.length === 0 ? (
-            <p className="py-4 text-center text-text-muted">
-              {'\u05D0\u05D9\u05DF \u05E9\u05D9\u05E8\u05D9\u05DD \u05E2\u05D3\u05D9\u05D9\u05DF \u2014 \u05D4\u05D5\u05E1\u05D9\u05E4\u05D5 \u05E9\u05D9\u05E8 \u05DB\u05D3\u05D9 \u05DC\u05D4\u05EA\u05D7\u05D9\u05DC'}
-            </p>
-          ) : (
-            <ReadinessCircle percent={overallReadiness} />
-          )}
-        </Card>
-      </section>
+      {/* ==================== Hero CTA ==================== */}
+      {stats && (
+        <section aria-label="primary-action">
+          <HeroCTA
+            userState={stats.userState}
+            dueChunksCount={stats.dueChunksCount}
+            estimatedMinutes={stats.estimatedMinutes}
+            songsCount={stats.songsCount}
+          />
+        </section>
+      )}
 
-      {/* ==================== Daily Queue ==================== */}
-      <section aria-labelledby="daily-queue-heading">
-        <Card
-          header={
-            <h2 id="daily-queue-heading" className="text-lg font-semibold text-foreground">
-              {'\u05EA\u05D5\u05E8 \u05D9\u05D5\u05DE\u05D9'}
-            </h2>
-          }
-          className="border-primary/20 bg-gradient-to-bl from-primary/5 to-transparent"
-        >
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      {/* ==================== New Assignments Alert ==================== */}
+      {stats && stats.newAssignments.length > 0 && (
+        <section aria-label="new-assignments">
+          <Card className="border-secondary/20 bg-gradient-to-bl from-secondary/5 to-transparent">
             <div>
-              {practiceQueue && practiceQueue.count > 0 ? (
-                <>
-                  <p className="text-2xl font-bold text-primary tabular-nums">
-                    {practiceQueue.count}{' '}
-                    <span className="text-base font-normal text-text-muted">
-                      {'\u05E7\u05D8\u05E2\u05D9\u05DD \u05DC\u05D7\u05D6\u05E8\u05D4'}
-                    </span>
-                  </p>
-                  <p className="mt-1 text-sm text-text-muted">
-                    ~{Math.ceil(practiceQueue.count * 1.5)}{' '}
-                    {'\u05D3\u05E7\u05D5\u05EA'}
-                  </p>
-                </>
-              ) : (
-                <p className="text-foreground">
-                  {'\u05D0\u05D9\u05DF \u05E7\u05D8\u05E2\u05D9\u05DD \u05DC\u05D7\u05D6\u05E8\u05D4 \u05D4\u05D9\u05D5\u05DD \u2014 \u05DB\u05DC \u05D4\u05DB\u05D1\u05D5\u05D3!'}
-                </p>
-              )}
+              <p className="text-sm font-semibold text-foreground mb-2">
+                {'שיעורים חדשים'}
+              </p>
+              <ul className="space-y-1">
+                {stats.newAssignments.map((a, i) => (
+                  <li key={i} className="text-sm text-text-muted">
+                    <span className="font-medium text-foreground">{a.songTitle}</span>
+                    {' — '}{a.assignedBy}
+                  </li>
+                ))}
+              </ul>
             </div>
-            {practiceQueue && practiceQueue.count > 0 && (
-              <Link href="/practice">
-                <Button variant="primary" size="lg">
-                  {'\u05D4\u05EA\u05D7\u05DC \u05EA\u05E8\u05D2\u05D5\u05DC'}
-                </Button>
-              </Link>
-            )}
-          </div>
-        </Card>
-      </section>
+          </Card>
+        </section>
+      )}
 
-      {/* ==================== Stats ==================== */}
+      {/* ==================== Stats Row ==================== */}
       <section aria-labelledby="stats-heading">
         <h2 id="stats-heading" className="mb-3 text-lg font-semibold text-foreground">
-          {'\u05E1\u05D8\u05D8\u05D9\u05E1\u05D8\u05D9\u05E7\u05D5\u05EA'}
+          {'סטטיסטיקות'}
         </h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatsCard
-            icon={'\uD83D\uDD25'}
-            label={'\u05E8\u05E6\u05E3 \u05EA\u05E8\u05D2\u05D5\u05DC'}
-            value={stats.practiceStreak}
-            subtitle={'\u05D9\u05DE\u05D9\u05DD \u05E8\u05E6\u05D5\u05E4\u05D9\u05DD'}
+            icon={'🔥'}
+            label={'רצף תרגול'}
+            value={stats?.user.currentStreak ?? 0}
+            subtitle={
+              streakAtRisk
+                ? '⚠️ תרגלו היום לשמור על הרצף!'
+                : 'ימים רצופים'
+            }
           />
           <StatsCard
-            icon={'\u2B50'}
+            icon={'⭐'}
             label={'XP'}
-            value={stats.totalXP}
+            value={stats?.user.xp ?? 0}
           />
           <StatsCard
-            icon={'\uD83C\uDFB5'}
-            label={'\u05E9\u05D9\u05E8\u05D9\u05DD'}
-            value={songs.length}
+            icon={'🎵'}
+            label={'שירים'}
+            value={stats?.songsCount ?? songs.length}
           />
           <StatsCard
-            icon={'\u2705'}
-            label={'\u05E7\u05D8\u05E2\u05D9\u05DD \u05DE\u05D5\u05E9\u05DC\u05DE\u05D9\u05DD'}
-            value={totalSolidChunks}
-            subtitle={`\u05DE\u05EA\u05D5\u05DA ${allChunks.length}`}
+            icon={'✅'}
+            label={'קטעים מושלמים'}
+            value={stats?.chunksMastered ?? 0}
+            subtitle={stats ? `מתוך ${stats.chunksTotal}` : undefined}
           />
         </div>
       </section>
 
-      {/* ==================== Songs Progress ==================== */}
-      <section aria-labelledby="songs-progress-heading">
-        <h2 id="songs-progress-heading" className="mb-3 text-lg font-semibold text-foreground">
-          {'\u05D4\u05EA\u05E7\u05D3\u05DE\u05D5\u05EA \u05E9\u05D9\u05E8\u05D9\u05DD'}
-        </h2>
+      {/* ==================== Weekly Activity + Achievements ==================== */}
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {/* Weekly Activity */}
+        {stats && stats.weekActivity.length > 0 && (
+          <Card
+            header={
+              <h2 className="text-sm font-semibold text-foreground">
+                {'פעילות השבוע'}
+              </h2>
+            }
+          >
+            <WeekActivity days={stats.weekActivity} />
+          </Card>
+        )}
 
-        {songs.length === 0 ? (
-          <EmptyState
-            icon={'\uD83C\uDFB6'}
-            title={'\u05D0\u05D9\u05DF \u05E9\u05D9\u05E8\u05D9\u05DD \u05E2\u05D3\u05D9\u05D9\u05DF'}
-            description={'\u05D4\u05D5\u05E1\u05D9\u05E4\u05D5 \u05E9\u05D9\u05E8 \u05D7\u05D3\u05E9 \u05D0\u05D5 \u05D4\u05E6\u05D8\u05E8\u05E4\u05D5 \u05DC\u05DE\u05E7\u05D4\u05DC\u05D4'}
-            actionLabel={'\u05D4\u05D5\u05E1\u05E4\u05EA \u05E9\u05D9\u05E8'}
-            onAction={() => {
-              window.location.href = '/songs/new'
-            }}
-          />
-        ) : (
+        {/* Achievements */}
+        {stats && (
+          <Card
+            header={
+              <h2 className="text-sm font-semibold text-foreground">
+                {'הישגים'}
+              </h2>
+            }
+          >
+            <AchievementProgress
+              recentAchievements={stats.recentAchievements}
+              nextMilestone={stats.nextMilestone}
+            />
+          </Card>
+        )}
+      </section>
+
+      {/* ==================== Vocal Practice Section ==================== */}
+      {stats && (stats.vocalQuota || stats.lastVocalScore) && (
+        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {stats.vocalQuota && (
+            <VocalQuotaCard
+              secondsUsed={stats.vocalQuota.secondsUsed}
+              secondsLimit={stats.vocalQuota.secondsLimit}
+            />
+          )}
+          {stats.lastVocalScore && (
+            <LastVocalScore
+              songTitle={stats.lastVocalScore.songTitle}
+              voicePart={stats.lastVocalScore.voicePart}
+              score={stats.lastVocalScore.score}
+              previousScore={stats.lastVocalScore.previousScore}
+            />
+          )}
+        </section>
+      )}
+
+      {/* ==================== Concert Countdowns + Weakest Chunks ==================== */}
+      {stats && (
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {stats.concertCountdowns.length > 0 && (
+            <ConcertCountdown concerts={stats.concertCountdowns} />
+          )}
+          {stats.weakestChunks.length > 0 && (
+            <WeakestChunks chunks={stats.weakestChunks} />
+          )}
+        </section>
+      )}
+
+      {/* ==================== Songs Progress ==================== */}
+      {songs.length > 0 && (
+        <section aria-labelledby="songs-progress-heading">
+          <h2 id="songs-progress-heading" className="mb-3 text-lg font-semibold text-foreground">
+            {'התקדמות שירים'}
+          </h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {songs.map((song) => (
               <SongReadinessCard key={song.id} song={song} />
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
     </div>
   )
 }

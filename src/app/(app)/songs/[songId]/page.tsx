@@ -276,6 +276,11 @@ export default function SongDetailPage() {
             &#127918; {tGames('title')}
           </Button>
         </Link>
+        <Link href={`/vocal-practice/${songId}`}>
+          <Button variant="outline" size="lg">
+            &#127908; {'תרגול קולי'}
+          </Button>
+        </Link>
       </div>
 
       {/* Audio player: voice-part tracks preferred, YouTube/Spotify fallback */}

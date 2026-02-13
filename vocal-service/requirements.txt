@@ -1,0 +1,13 @@
+modal
+fastapi
+uvicorn
+boto3
+anthropic
+numpy
+librosa
+parselmouth-praat
+fastdtw
+scipy
+demucs
+torch
+psycopg2-binary

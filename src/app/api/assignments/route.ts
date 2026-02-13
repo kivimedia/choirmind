@@ -111,14 +111,21 @@ export async function POST(request: NextRequest) {
       resolvedChoirId = song.choirId
     }
 
-    // Verify user is a director of this choir
-    const membership = await prisma.choirMember.findUnique({
-      where: {
-        userId_choirId: { userId, choirId: resolvedChoirId },
-      },
-    })
+    // Verify user is a director of this choir (or admin)
+    const [membership, user] = await Promise.all([
+      prisma.choirMember.findUnique({
+        where: {
+          userId_choirId: { userId, choirId: resolvedChoirId },
+        },
+      }),
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      }),
+    ])
 
-    if (!membership || membership.role !== 'director') {
+    const isAdmin = user?.role === 'admin'
+    if (!isAdmin && (!membership || membership.role !== 'director')) {
       return NextResponse.json(
         { error: 'Only choir directors can create assignments' },
         { status: 403 }
@@ -244,8 +251,9 @@ export async function POST(request: NextRequest) {
     )
   } catch (error) {
     console.error('POST /api/assignments error:', error)
+    const message = error instanceof Error ? error.message : 'Failed to create assignment'
     return NextResponse.json(
-      { error: 'Failed to create assignment' },
+      { error: message },
       { status: 500 }
     )
   }

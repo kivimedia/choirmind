@@ -290,7 +290,7 @@ export default function AudioUploadPanel({
           גררו קבצי שמע לכאן או לחצו לבחירה
         </p>
         <p className="text-xs text-text-muted">
-          MP3, M4A, WAV, OGG — עד 50MB
+          MP3, M4A, WAV, OGG - עד 50MB
         </p>
         <input
           ref={fileInputRef}

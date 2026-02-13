@@ -260,7 +260,7 @@ export default function FinishTheLine({
         <div>
           <textarea
             ref={textareaRef}
-            dir="auto"
+            dir="rtl"
             rows={2}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}

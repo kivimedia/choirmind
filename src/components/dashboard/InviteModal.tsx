@@ -43,7 +43,7 @@ export default function InviteModal({ isOpen, onClose, inviteCode }: InviteModal
     >
       <div className="space-y-5 text-center">
         <p className="text-sm text-text-muted">
-          שלחו את הקישור הזה לחברי המקהלה — הם יתחברו ויצטרפו אוטומטית
+          שלחו את הקישור הזה לחברי המקהלה - הם יתחברו ויצטרפו אוטומטית
         </p>
 
         {/* Link display */}

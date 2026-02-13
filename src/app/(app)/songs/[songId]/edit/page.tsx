@@ -1024,7 +1024,7 @@ export default function EditSongPage() {
       <Modal
         isOpen={syncChunkIndex !== null}
         onClose={() => setSyncChunkIndex(null)}
-        title={`סנכרון מילים — ${syncChunkIndex !== null ? chunks[syncChunkIndex]?.label : ''} (${(syncChunkIndex ?? 0) + 1}/${chunks.length})`}
+        title={`סנכרון מילים - ${syncChunkIndex !== null ? chunks[syncChunkIndex]?.label : ''} (${(syncChunkIndex ?? 0) + 1}/${chunks.length})`}
         className="max-w-2xl"
       >
         {syncChunkIndex !== null && (youtubeVideoId || audioTracks.length > 0) && chunks[syncChunkIndex] && (
@@ -1111,7 +1111,7 @@ export default function EditSongPage() {
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-foreground">{result.title}</span>
                       {result.artist && (
-                        <span className="text-xs text-text-muted">— {result.artist}</span>
+                        <span className="text-xs text-text-muted">- {result.artist}</span>
                       )}
                     </div>
                     <span className="rounded-full bg-surface-hover px-2 py-0.5 text-[10px] font-medium text-text-muted">

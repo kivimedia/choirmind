@@ -123,7 +123,7 @@ export default function GuidedPracticePage() {
             setImprovements((prev) => [
               ...prev,
               {
-                chunkLabel: `${currentChunk.songTitle} — ${currentChunk.chunkLabel}`,
+                chunkLabel: `${currentChunk.songTitle} - ${currentChunk.chunkLabel}`,
                 oldStatus: result.improvement.oldStatus,
                 newStatus: result.improvement.newStatus,
               },

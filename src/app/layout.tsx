@@ -5,7 +5,7 @@ import { Providers } from './providers'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'ChoirMind — שינון שירים מבוסס מדע',
+  title: 'ChoirMind - שינון שירים מבוסס מדע',
   description: 'אפליקציה לשינון שירים מבוסס מדע למקהלות',
 }
 
