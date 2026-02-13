@@ -46,6 +46,8 @@ export default function ScanPage() {
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState({ done: 0, total: 0, errors: 0 })
   const [importDone, setImportDone] = useState(false)
+  const [demucsStatus, setDemucsStatus] = useState<string | null>(null)
+  const [rescanning, setRescanning] = useState(false)
 
   const isDirector = session?.user?.role === 'director' || session?.user?.role === 'admin'
 
@@ -152,6 +154,7 @@ export default function ScanPage() {
 
     let done = 0
     let errors = 0
+    const importedSongIds: string[] = []
 
     for (const idx of selected) {
       const song = songs[idx]
@@ -186,6 +189,7 @@ export default function ScanPage() {
 
         const songData = await songRes.json()
         const songId = songData.song?.id
+        if (songId) importedSongIds.push(songId)
 
         // Create audio tracks
         if (songId && song.audioFiles.length > 0) {
@@ -218,6 +222,54 @@ export default function ScanPage() {
 
     setImportDone(true)
     setImporting(false)
+
+    // Auto-trigger Demucs reference preparation for imported songs
+    if (importedSongIds.length > 0) {
+      setDemucsStatus('מעבד אודיו לתרגול קולי...')
+      try {
+        const res = await fetch('/api/vocal-analysis/references/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ songIds: importedSongIds }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setDemucsStatus(`${data.queued} הפניות קוליות נשלחו לעיבוד`)
+        } else {
+          setDemucsStatus('שגיאה בהפעלת עיבוד קולי')
+        }
+      } catch {
+        setDemucsStatus('שגיאה בהפעלת עיבוד קולי')
+      }
+    }
+  }
+
+  // Rescan: process existing choir audio tracks that don't have references
+  async function handleRescan() {
+    if (!activeChoirId) return
+    setRescanning(true)
+    setDemucsStatus('סורק קבצי אודיו קיימים...')
+    try {
+      const res = await fetch('/api/vocal-analysis/references/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ choirId: activeChoirId }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setDemucsStatus(
+          data.queued > 0
+            ? `${data.queued} הפניות חדשות נשלחו לעיבוד (${data.skipped} כבר קיימות)`
+            : 'כל קבצי האודיו כבר מעובדים'
+        )
+      } else {
+        setDemucsStatus('שגיאה')
+      }
+    } catch {
+      setDemucsStatus('שגיאה')
+    } finally {
+      setRescanning(false)
+    }
   }
 
   // ── Guard ─────────────────────────────────────────────────────────────
@@ -259,6 +311,28 @@ export default function ScanPage() {
           חזרה
         </Button>
       </div>
+
+      {/* Rescan existing audio */}
+      <Card className="!p-4 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-foreground">עיבוד הפניות קוליות</p>
+          <p className="text-xs text-text-muted">עבדו את כל קבצי האודיו הקיימים שטרם עובדו</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          loading={rescanning}
+          onClick={handleRescan}
+        >
+          סרוק מחדש
+        </Button>
+      </Card>
+
+      {demucsStatus && (
+        <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-2 text-sm text-foreground">
+          {demucsStatus}
+        </div>
+      )}
 
       {/* URL input */}
       <Card className="!p-5">

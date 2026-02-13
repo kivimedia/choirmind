@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
     // Verify the source track exists and belongs to this song
     const sourceTrack = await prisma.audioTrack.findUnique({
       where: { id: sourceTrackId },
-      select: { id: true, songId: true, durationMs: true },
+      select: { id: true, songId: true, durationMs: true, fileUrl: true },
     })
 
     if (!sourceTrack || sourceTrack.songId !== songId) {
@@ -87,10 +87,11 @@ export async function POST(request: NextRequest) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          referenceId: reference.id,
+          referenceVocalId: reference.id,
           songId,
           voicePart,
           sourceTrackId,
+          audioFileUrl: sourceTrack.fileUrl,
         }),
       }).catch((err) => {
         console.error('[vocal-analysis/references/prepare] Failed to trigger vocal service:', err)

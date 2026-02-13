@@ -72,12 +72,13 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { name, locale, weekStart } = body
+    const { name, locale, weekStart, leaderboardEnabled } = body
 
-    const updateData: Record<string, string> = {}
+    const updateData: Record<string, unknown> = {}
     if (name && typeof name === 'string' && name.trim()) updateData.name = name.trim()
     if (locale && typeof locale === 'string') updateData.locale = locale
     if (weekStart && (weekStart === 'sunday' || weekStart === 'monday')) updateData.weekStart = weekStart
+    if (typeof leaderboardEnabled === 'boolean') updateData.leaderboardEnabled = leaderboardEnabled
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })

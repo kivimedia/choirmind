@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { calculateChunkXp } from '@/lib/xp'
+import { checkAndUnlockAchievements } from '@/lib/achievement-checker'
 
 // GET /api/practice — get today's review queue, or chunk progress for a specific song
 export async function GET(request: NextRequest) {
@@ -102,12 +104,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Calculate XP from chunks practiced
+    // Fetch user streak for multiplier
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { currentStreak: true },
+    })
+    const currentStreak = currentUser?.currentStreak ?? 0
+
+    // Calculate XP from chunks practiced with streak multiplier
     let totalXp = 0
     for (const chunk of chunksPracticed) {
-      if (chunk.selfRating === 'nailed_it') totalXp += 10
-      else if (chunk.selfRating === 'almost') totalXp += 5
-      else totalXp += 2
+      totalXp += calculateChunkXp({
+        selfRating: chunk.selfRating,
+        currentStreak,
+      })
     }
 
     // Create practice session and update user stats in a transaction
@@ -163,7 +173,13 @@ export async function POST(request: NextRequest) {
         },
       })
 
-      return { practiceSession, totalXp, newStreak }
+      // Check streak-based achievements
+      const unlockedAchievements = await checkAndUnlockAchievements(tx, userId, {
+        type: 'streak_update',
+        currentStreak: newStreak,
+      })
+
+      return { practiceSession, totalXp, newStreak, unlockedAchievements }
     })
 
     return NextResponse.json(
@@ -171,6 +187,7 @@ export async function POST(request: NextRequest) {
         session: result.practiceSession,
         xpEarned: result.totalXp,
         currentStreak: result.newStreak,
+        unlockedAchievements: result.unlockedAchievements,
       },
       { status: 201 }
     )

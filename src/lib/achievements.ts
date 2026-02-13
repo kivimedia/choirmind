@@ -35,7 +35,12 @@ export type AchievementKey =
   | 'streak_7'
   | 'streak_30'
   | 'songs_5'
-  | 'songs_10';
+  | 'songs_10'
+  | 'first_vocal'
+  | 'perfect_section'
+  | 'part_master'
+  | 'quick_learner'
+  | 'choir_ready';
 
 // ---------------------------------------------------------------------------
 // Achievement definitions
@@ -149,6 +154,61 @@ export const ACHIEVEMENTS: Record<AchievementKey, AchievementDefinition> = {
     description: {
       he: 'למדת 10 שירים',
       en: 'Learned 10 songs',
+    },
+  },
+
+  first_vocal: {
+    key: 'first_vocal',
+    hebrewName: 'הצלילים הראשונים',
+    englishName: 'First Notes',
+    icon: '🎤',
+    description: {
+      he: 'ביצעתם את תרגול הקול הראשון שלכם',
+      en: 'Completed your first vocal practice session',
+    },
+  },
+
+  perfect_section: {
+    key: 'perfect_section',
+    hebrewName: 'קטע מושלם',
+    englishName: 'Perfect Section',
+    icon: '💎',
+    description: {
+      he: 'קיבלתם 95%+ בקטע קולי',
+      en: 'Scored 95%+ on a vocal section',
+    },
+  },
+
+  part_master: {
+    key: 'part_master',
+    hebrewName: 'שליטה מלאה',
+    englishName: 'Part Master',
+    icon: '👑',
+    description: {
+      he: '90%+ בכל הקטעים של שיר',
+      en: '90%+ on all sections of a song',
+    },
+  },
+
+  quick_learner: {
+    key: 'quick_learner',
+    hebrewName: 'לומד/ת מהיר/ה',
+    englishName: 'Quick Learner',
+    icon: '🚀',
+    description: {
+      he: 'שיפרתם ציון שיר ב-20+ נקודות בסשן אחד',
+      en: 'Improved a song score by 20+ points in one session',
+    },
+  },
+
+  choir_ready: {
+    key: 'choir_ready',
+    hebrewName: 'מוכנים להופעה',
+    englishName: 'Choir Ready',
+    icon: '🎼',
+    description: {
+      he: '80%+ בכל השירים המשובצים',
+      en: '80%+ on all assigned songs',
     },
   },
 };

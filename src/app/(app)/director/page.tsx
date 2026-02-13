@@ -10,6 +10,9 @@ import ProgressBar from '@/components/ui/ProgressBar'
 import EmptyState from '@/components/ui/EmptyState'
 import InviteModal from '@/components/dashboard/InviteModal'
 import AssignmentModal from '@/components/dashboard/AssignmentModal'
+import MemberVocalProgress from '@/components/director/MemberVocalProgress'
+import ReferenceUploadPanel from '@/components/director/ReferenceUploadPanel'
+import ChoirReadinessIndicator from '@/components/director/ChoirReadinessIndicator'
 import { useChoirStore } from '@/stores/useChoirStore'
 
 // ---------------------------------------------------------------------------
@@ -177,6 +180,7 @@ export default function DirectorPage() {
   // Modal state
   const [inviteModalOpen, setInviteModalOpen] = useState(false)
   const [assignmentModalOpen, setAssignmentModalOpen] = useState(false)
+  const [refUpload, setRefUpload] = useState<{ songId: string; voicePart: string } | null>(null)
 
   // ---- Fetch data ----
   useEffect(() => {
@@ -327,48 +331,11 @@ export default function DirectorPage() {
       </div>
 
       {/* ==================== Choir Readiness ==================== */}
-      <section aria-labelledby="choir-readiness-heading">
-        <Card
-          header={
-            <h2 id="choir-readiness-heading" className="text-lg font-semibold text-foreground">
-              {'\u05DE\u05D5\u05DB\u05E0\u05D5\u05EA \u05D4\u05DE\u05E7\u05D4\u05DC\u05D4'}
-            </h2>
-          }
-        >
-          {songs.length === 0 ? (
-            <p className="py-4 text-center text-text-muted">
-              {'\u05D0\u05D9\u05DF \u05E9\u05D9\u05E8\u05D9\u05DD \u05D1\u05DE\u05E7\u05D4\u05DC\u05D4'}
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {/* Overall */}
-              <div className="flex items-center gap-4">
-                <span className="text-sm font-medium text-text-muted shrink-0">
-                  {'\u05DB\u05DC\u05DC\u05D9'}
-                </span>
-                <ProgressBar value={overallChoirReadiness} showLabel size="lg" />
-              </div>
-
-              {/* Per-song */}
-              <div className="space-y-3">
-                {songs.map((song) => (
-                  <div key={song.id} className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-foreground truncate">
-                        {song.title}
-                      </span>
-                      <span className="text-xs text-text-muted tabular-nums" dir="ltr">
-                        {songReadinessMap[song.id] ?? 0}%
-                      </span>
-                    </div>
-                    <ProgressBar value={songReadinessMap[song.id] ?? 0} size="sm" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </Card>
-      </section>
+      {choir && (
+        <section aria-labelledby="choir-readiness-heading">
+          <ChoirReadinessIndicator choirId={choir.id} />
+        </section>
+      )}
 
       {/* ==================== Trouble Spots ==================== */}
       <section aria-labelledby="trouble-spots-heading">
@@ -544,7 +511,56 @@ export default function DirectorPage() {
         </Card>
       </section>
 
+      {/* ==================== Reference Vocals ==================== */}
+      {songs.length > 0 && (
+        <section aria-labelledby="references-heading">
+          <Card
+            header={
+              <h2 id="references-heading" className="text-lg font-semibold text-foreground">
+                {'הפניות קוליות'}
+              </h2>
+            }
+          >
+            <div className="space-y-4">
+              {songs.map((song) => (
+                <div key={song.id} className="space-y-2">
+                  <p className="text-sm font-medium text-foreground">{song.title}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(voicePartLabels).map(([part, label]) => (
+                      <Button
+                        key={part}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRefUpload({ songId: song.id, voicePart: part })}
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </section>
+      )}
+
+      {/* ==================== Vocal Progress ==================== */}
+      {choir && (
+        <section aria-labelledby="vocal-progress-heading">
+          <MemberVocalProgress choirId={choir.id} />
+        </section>
+      )}
+
       {/* ==================== Modals ==================== */}
+      {refUpload && (
+        <ReferenceUploadPanel
+          isOpen={!!refUpload}
+          onClose={() => setRefUpload(null)}
+          songId={refUpload.songId}
+          voicePart={refUpload.voicePart}
+        />
+      )}
+
       <InviteModal
         isOpen={inviteModalOpen}
         onClose={() => setInviteModalOpen(false)}

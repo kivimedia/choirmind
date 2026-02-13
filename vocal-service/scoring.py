@@ -315,3 +315,169 @@ def _identify_problem_areas(
             selected.append(entry)
 
     return selected
+
+
+# ---------------------------------------------------------------------------
+# Standalone scoring (no reference)
+# ---------------------------------------------------------------------------
+
+
+def score_standalone(user_features: dict) -> dict:
+    """Score a recording without a reference (self-analysis).
+
+    Evaluates:
+    - Pitch: stability/consistency of F0 (low variance = good)
+    - Timing: regularity of onsets
+    - Dynamics: energy range utilization
+    """
+    pitch_values = np.array(user_features["pitch_values"])
+    # Filter out NaN (unvoiced)
+    voiced = pitch_values[~np.isnan(pitch_values)]
+
+    # Pitch stability: coefficient of variation (lower = more stable = better)
+    if len(voiced) > 10:
+        # Convert to cents relative to median
+        median_f0 = np.median(voiced)
+        cents_from_median = 1200.0 * np.log2(voiced / median_f0)
+        pitch_std_cents = float(np.std(cents_from_median))
+        # Score: std of 80 cents or less = 100, std of 250+ = 30
+        if pitch_std_cents <= 80:
+            pitch_score = 100.0
+        elif pitch_std_cents >= 250:
+            pitch_score = 30.0
+        else:
+            pitch_score = 100.0 - (pitch_std_cents - 80) / (250 - 80) * 70.0
+        # Bonus for good voicing ratio
+        voicing_ratio = len(voiced) / len(pitch_values) if len(pitch_values) > 0 else 0
+        pitch_score = pitch_score * (0.7 + 0.3 * voicing_ratio)
+    else:
+        pitch_score = 30.0
+
+    # Timing: onset regularity
+    onset_times = np.array(user_features["onset_times"])
+    if len(onset_times) > 3:
+        intervals = np.diff(onset_times)
+        cv = float(np.std(intervals) / np.mean(intervals)) if np.mean(intervals) > 0 else 1.0
+        # CV of 0 = perfect regularity = 100, CV of 1+ = 0
+        timing_score = max(0.0, min(100.0, 100.0 * (1.0 - cv)))
+        # Adjust: some irregularity is natural in music
+        timing_score = min(100.0, timing_score * 1.3)
+    else:
+        timing_score = 50.0
+
+    # Dynamics: energy range and variation
+    rms_values = np.array(user_features["rms_values"])
+    if len(rms_values) > 10:
+        rms_cv = float(np.std(rms_values) / np.mean(rms_values)) if np.mean(rms_values) > 0 else 0
+        # Good dynamics = some variation (not flat, not chaotic)
+        if 0.15 <= rms_cv <= 0.6:
+            dynamics_score = 90.0
+        elif rms_cv < 0.15:
+            dynamics_score = 50.0 + rms_cv / 0.15 * 40
+        else:
+            dynamics_score = max(20.0, 90.0 - (rms_cv - 0.6) / 0.4 * 70.0)
+    else:
+        dynamics_score = 50.0
+
+    overall = pitch_score * WEIGHT_PITCH + timing_score * WEIGHT_TIMING + dynamics_score * WEIGHT_DYNAMICS
+
+    # Generate section scores
+    duration = user_features.get("duration_s", 0)
+    section_scores: list[dict] = []
+    if duration > 0:
+        section_dur = duration / NUM_SECTIONS
+        rms_times = np.array(user_features["rms_times"])
+        pitch_times = np.array(user_features["pitch_times"])
+
+        for sec_idx in range(NUM_SECTIONS):
+            t_start = sec_idx * section_dur
+            t_end = (sec_idx + 1) * section_dur
+
+            # Section pitch
+            sec_mask = (pitch_times >= t_start) & (pitch_times < t_end)
+            sec_pitched = pitch_values[sec_mask]
+            sec_voiced = sec_pitched[~np.isnan(sec_pitched)]
+            if len(sec_voiced) > 5:
+                sec_median_f0 = np.median(sec_voiced)
+                sec_cents = 1200.0 * np.log2(sec_voiced / sec_median_f0)
+                sec_std = float(np.std(sec_cents))
+                if sec_std <= 80:
+                    sec_p = 100.0
+                elif sec_std >= 250:
+                    sec_p = 30.0
+                else:
+                    sec_p = 100.0 - (sec_std - 80) / (250 - 80) * 70.0
+            else:
+                sec_p = 50.0
+
+            # Section timing (onset regularity in this section)
+            sec_onsets = onset_times[(onset_times >= t_start) & (onset_times < t_end)]
+            if len(sec_onsets) > 2:
+                sec_intervals = np.diff(sec_onsets)
+                sec_cv = float(np.std(sec_intervals) / np.mean(sec_intervals)) if np.mean(sec_intervals) > 0 else 1.0
+                sec_t = max(0.0, min(100.0, 100.0 * (1.0 - sec_cv) * 1.3))
+            else:
+                sec_t = 50.0
+
+            # Section dynamics
+            sec_rms_mask = (rms_times >= t_start) & (rms_times < t_end)
+            sec_rms = rms_values[sec_rms_mask]
+            if len(sec_rms) > 3:
+                sec_rms_cv = float(np.std(sec_rms) / np.mean(sec_rms)) if np.mean(sec_rms) > 0 else 0
+                if 0.15 <= sec_rms_cv <= 0.6:
+                    sec_d = 90.0
+                elif sec_rms_cv < 0.15:
+                    sec_d = 50.0 + sec_rms_cv / 0.15 * 40
+                else:
+                    sec_d = max(20.0, 90.0 - (sec_rms_cv - 0.6) / 0.4 * 70.0)
+            else:
+                sec_d = 50.0
+
+            sec_overall = sec_p * WEIGHT_PITCH + sec_t * WEIGHT_TIMING + sec_d * WEIGHT_DYNAMICS
+            section_scores.append({
+                "sectionIndex": sec_idx,
+                "startTime": round(t_start, 2),
+                "endTime": round(t_end, 2),
+                "overallScore": round(sec_overall, 1),
+                "pitchScore": round(sec_p, 1),
+                "timingScore": round(sec_t, 1),
+                "dynamicsScore": round(sec_d, 1),
+            })
+
+    # Problem areas: find sections with worst scores
+    problem_areas: list[dict] = []
+    for sec in sorted(section_scores, key=lambda s: s["overallScore"]):
+        if sec["overallScore"] < 70 and len(problem_areas) < 3:
+            issues: list[str] = []
+            if sec["pitchScore"] < 60:
+                issues.append("pitch")
+            if sec["timingScore"] < 60:
+                issues.append("timing")
+            if sec["dynamicsScore"] < 60:
+                issues.append("dynamics")
+            if issues:
+                problem_areas.append({
+                    "startTime": sec["startTime"],
+                    "endTime": sec["endTime"],
+                    "issues": issues,
+                    "avgPitchDevCents": round(100 - sec["pitchScore"], 1),
+                    "avgTimingOffsetMs": round((100 - sec["timingScore"]) * 2, 1),
+                    "avgEnergyRatio": 1.0,
+                })
+
+    result = {
+        "overallScore": round(overall, 1),
+        "pitchScore": round(pitch_score, 1),
+        "timingScore": round(timing_score, 1),
+        "dynamicsScore": round(dynamics_score, 1),
+        "sectionScores": section_scores,
+        "problemAreas": problem_areas,
+    }
+    logger.info(
+        "Standalone scoring: overall=%.1f pitch=%.1f timing=%.1f dynamics=%.1f",
+        result["overallScore"],
+        result["pitchScore"],
+        result["timingScore"],
+        result["dynamicsScore"],
+    )
+    return result

@@ -11,6 +11,9 @@ import WeakestChunks from '@/components/dashboard/WeakestChunks'
 import ConcertCountdown from '@/components/dashboard/ConcertCountdown'
 import AchievementProgress from '@/components/dashboard/AchievementProgress'
 import { VocalQuotaCard, LastVocalScore } from '@/components/dashboard/VocalQuotaCard'
+import VocalProgressCard from '@/components/dashboard/VocalProgressCard'
+import Leaderboard from '@/components/dashboard/Leaderboard'
+import { useChoirStore } from '@/stores/useChoirStore'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -92,6 +95,7 @@ function LoadingSkeleton() {
 
 export default function DashboardPage() {
   const { data: session } = useSession()
+  const { activeChoirId } = useChoirStore()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [songs, setSongs] = useState<SongData[]>([])
   const [loading, setLoading] = useState(true)
@@ -278,6 +282,12 @@ export default function DashboardPage() {
           )}
         </section>
       )}
+
+      {/* ==================== Vocal Progress + Leaderboard ==================== */}
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <VocalProgressCard />
+        {activeChoirId && <Leaderboard choirId={activeChoirId} maxRows={5} />}
+      </section>
 
       {/* ==================== Concert Countdowns + Weakest Chunks ==================== */}
       {stats && (

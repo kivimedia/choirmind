@@ -40,3 +40,14 @@ prisma/dev.db-journal
 nul
 
 .vercel
+.env*.local
+
+# python
+__pycache__/
+*.pyc
+
+# reports
+mila-scrape-report.json
+
+# migration scripts (one-off)
+scripts/migrate-to-pg.ts

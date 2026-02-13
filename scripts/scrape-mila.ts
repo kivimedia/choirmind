@@ -11,9 +11,11 @@
  *
  * Usage:
  *   npm run scrape:mila
- *   npm run scrape:mila -- --dry-run    (preview without writing)
- *   npm run scrape:mila -- --choir-id <id>  (specify choir to attach songs to)
- *   npm run scrape:mila -- --local <path>   (use a saved HTML file instead of fetching)
+ *   npm run scrape:mila -- --dry-run         (preview without writing)
+ *   npm run scrape:mila -- --choir-id <id>   (specify choir to attach songs to)
+ *   npm run scrape:mila -- --local <path>    (use a saved HTML file instead of fetching)
+ *   npm run scrape:mila -- --rescan          (only import songs NOT already in DB)
+ *   npm run scrape:mila -- --process-refs    (create Demucs references for tracks without READY refs)
  */
 
 import { chromium } from 'playwright'
@@ -38,6 +40,8 @@ const SILENCE_FILE_ID = '7fee58_7102f0c610934d27b103483f2d2320bd'
 const PLACEHOLDER_FILE_ID = '7fee58_fffea4a62b2c46c389d2ac8982d8b878'
 
 const DRY_RUN = process.argv.includes('--dry-run')
+const RESCAN = process.argv.includes('--rescan')
+const PROCESS_REFS = process.argv.includes('--process-refs')
 const CHOIR_ID_FLAG = process.argv.indexOf('--choir-id')
 const CHOIR_ID = CHOIR_ID_FLAG !== -1 ? process.argv[CHOIR_ID_FLAG + 1] : null
 const LOCAL_FLAG = process.argv.indexOf('--local')
@@ -346,6 +350,8 @@ async function main() {
 
   console.log('Starting MILA scraper...')
   if (DRY_RUN) console.log('DRY RUN — no database or S3 writes')
+  if (RESCAN) console.log('RESCAN MODE — only importing new songs not already in DB')
+  if (PROCESS_REFS) console.log('PROCESS-REFS — will create reference vocals for tracks without READY references')
   if (CHOIR_ID) console.log(`Attaching songs to choir: ${CHOIR_ID}`)
 
   let html: string
@@ -377,9 +383,24 @@ async function main() {
   console.log(`HTML size: ${(html.length / 1024 / 1024).toFixed(1)}MB`)
 
   // Extract songs from the Wix warmup data
-  const songs = extractSongsFromWarmupData(html)
+  let songs = extractSongsFromWarmupData(html)
   report.songsFound = songs.length
   console.log(`\nFound ${songs.length} songs\n`)
+
+  // In --rescan mode, filter out songs that already exist
+  if (RESCAN && !DRY_RUN) {
+    const existingTitles = new Set(
+      (await prisma.song.findMany({
+        where: { source: 'mila' },
+        select: { title: true },
+      })).map((s) => s.title)
+    )
+    const beforeCount = songs.length
+    songs = songs.filter((s) => !existingTitles.has(s.title))
+    console.log(`Rescan: ${beforeCount - songs.length} already exist, ${songs.length} new songs to import\n`)
+  }
+
+  const importedSongIds: string[] = []
 
   for (const scraped of songs) {
     console.log(`\n--- ${scraped.title} ---`)
@@ -419,6 +440,7 @@ async function main() {
       },
     })
     report.songsCreated++
+    importedSongIds.push(song.id)
     console.log(`  Created song: ${song.id}`)
 
     // Process audio tracks
@@ -469,6 +491,93 @@ async function main() {
         report.failures.push(msg)
         console.error(`    ${msg}`)
       }
+    }
+  }
+
+  // --process-refs: Create ReferenceVocal records for all tracks without READY references
+  if (PROCESS_REFS && !DRY_RUN) {
+    console.log('\n--- Processing reference vocals ---')
+
+    // Find all audio tracks (optionally scoped to choir)
+    const trackFilter: Record<string, unknown> = {}
+    if (CHOIR_ID) {
+      trackFilter.song = { choirId: CHOIR_ID }
+    } else if (importedSongIds.length > 0) {
+      trackFilter.songId = { in: importedSongIds }
+    }
+
+    const tracks = await prisma.audioTrack.findMany({
+      where: trackFilter,
+      include: {
+        referenceVocals: { where: { status: 'READY' } },
+        song: { select: { id: true, title: true } },
+      },
+    })
+
+    let refsCreated = 0
+    const pendingRefs: { id: string; songId: string; voicePart: string; sourceTrackId: string }[] = []
+
+    for (const track of tracks) {
+      // Skip if track already has a READY reference
+      if (track.referenceVocals.length > 0) continue
+      // Skip non-vocal parts
+      if (track.voicePart === 'playback' || track.voicePart === 'full') continue
+
+      // Check if there's already a PENDING/PROCESSING reference
+      const existingRef = await prisma.referenceVocal.findFirst({
+        where: {
+          songId: track.songId,
+          voicePart: track.voicePart,
+          sourceTrackId: track.id,
+          status: { in: ['PENDING', 'PROCESSING'] },
+        },
+      })
+      if (existingRef) continue
+
+      const ref = await prisma.referenceVocal.create({
+        data: {
+          songId: track.songId,
+          voicePart: track.voicePart,
+          sourceTrackId: track.id,
+          featuresFileUrl: '',
+          durationMs: track.durationMs ?? 0,
+          status: 'PENDING',
+        },
+      })
+      pendingRefs.push({ id: ref.id, songId: track.songId, voicePart: track.voicePart, sourceTrackId: track.id })
+      refsCreated++
+      console.log(`  Created reference: ${track.song.title} [${track.voicePart}]`)
+    }
+
+    console.log(`  Created ${refsCreated} reference vocal records`)
+
+    // Fire HTTP requests to vocal service for PENDING references
+    const vocalServiceUrl = process.env.VOCAL_SERVICE_URL
+    if (vocalServiceUrl && pendingRefs.length > 0) {
+      console.log(`  Sending ${pendingRefs.length} references to vocal service...`)
+      for (const ref of pendingRefs) {
+        try {
+          const track = await prisma.audioTrack.findUnique({
+            where: { id: ref.sourceTrackId },
+            select: { fileUrl: true },
+          })
+          await fetch(`${vocalServiceUrl}/api/v1/prepare-reference`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              referenceVocalId: ref.id,
+              songId: ref.songId,
+              voicePart: ref.voicePart,
+              audioFileUrl: track?.fileUrl,
+            }),
+          })
+          console.log(`    Sent: ${ref.songId} [${ref.voicePart}]`)
+        } catch (err) {
+          console.error(`    Failed to send reference ${ref.id}:`, err)
+        }
+      }
+    } else if (!vocalServiceUrl) {
+      console.log('  No VOCAL_SERVICE_URL configured — references created as PENDING')
     }
   }
 

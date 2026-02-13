@@ -44,13 +44,13 @@ image = (
         "anthropic",
         "numpy",
         "librosa",
-        "parselmouth-praat",
+        "praat-parselmouth",
         "fastdtw",
         "scipy",
-        "demucs",
         "torch",
         "psycopg2-binary",
         "pydantic",
+        "demucs",
     )
 )
 
@@ -213,9 +213,28 @@ def _create_vocal_practice_session(
     coaching_tips: list[str],
     duration_ms: int,
     xp_earned: int,
+    isolated_vocal_url: Optional[str] = None,
 ) -> str:
-    """Insert a VocalPracticeSession row and return its id."""
+    """Insert a VocalPracticeSession row and return its id.
+
+    When *isolated_vocal_url* is provided it is embedded in the
+    ``sectionScores`` JSON column as a wrapper object so the frontend
+    can retrieve the playback URL:
+
+        {"sections": [...], "isolatedVocalUrl": "https://..."}
+    """
     session_id = str(uuid.uuid4())
+
+    # Build the sectionScores JSON, optionally wrapping with isolatedVocalUrl
+    raw_sections = scores.get("sectionScores", [])
+    if isolated_vocal_url:
+        section_scores_json = json.dumps(
+            {"sections": raw_sections, "isolatedVocalUrl": isolated_vocal_url},
+            ensure_ascii=False,
+        )
+    else:
+        section_scores_json = json.dumps(raw_sections, ensure_ascii=False)
+
     conn = _get_db_conn()
     try:
         with conn.cursor() as cur:
@@ -247,7 +266,7 @@ def _create_vocal_practice_session(
                     scores["pitchScore"],
                     scores["timingScore"],
                     scores["dynamicsScore"],
-                    json.dumps(scores.get("sectionScores", []), ensure_ascii=False),
+                    section_scores_json,
                     json.dumps(scores.get("problemAreas", []), ensure_ascii=False),
                     json.dumps(coaching_tips, ensure_ascii=False),
                     xp_earned,
@@ -353,6 +372,115 @@ def _get_song_title(song_id: str) -> Optional[str]:
             return row[0] if row else None
     finally:
         conn.close()
+
+
+def _auto_create_reference(song_id: str, voice_part: str) -> Optional[dict]:
+    """Auto-create a reference vocal from the song's audio tracks.
+
+    Looks up the AudioTrack table for the song, downloads the audio,
+    runs Demucs vocal isolation, extracts features, uploads results to S3,
+    and creates a ReferenceVocal DB record with status=READY.
+
+    Returns a dict with 'features' and 'referenceVocalId', or None if
+    no audio tracks exist for this song.
+    """
+    conn = _get_db_conn()
+    try:
+        with conn.cursor() as cur:
+            # Prefer matching voice part, fall back to 'full' or 'mix'
+            cur.execute(
+                '''
+                SELECT id, "voicePart", "fileUrl" FROM "AudioTrack"
+                WHERE "songId" = %s
+                ORDER BY
+                    CASE "voicePart"
+                        WHEN %s THEN 0
+                        WHEN 'full' THEN 1
+                        WHEN 'mix' THEN 2
+                        ELSE 3
+                    END
+                LIMIT 1
+                ''',
+                (song_id, voice_part),
+            )
+            row = cur.fetchone()
+            if not row:
+                logger.info("No audio tracks found for song %s", song_id)
+                return None
+            track_id, track_voice_part, file_url = row
+    finally:
+        conn.close()
+
+    logger.info(
+        "Auto-creating reference from track %s (%s)", track_id, track_voice_part
+    )
+
+    # Download the audio track
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        src_path = tmp.name
+    _download_url_from_s3(file_url, src_path)
+
+    with open(src_path, "rb") as f:
+        audio_bytes = f.read()
+    os.unlink(src_path)
+
+    # Run Demucs to isolate vocals
+    vocal_bytes = run_demucs_isolation.remote(audio_bytes, "auto_reference.wav")
+
+    # Extract features
+    features = run_feature_extraction.remote(vocal_bytes, "auto_reference_vocal.wav")
+
+    # Upload to S3
+    ref_id = str(uuid.uuid4())
+    s3_prefix = f"reference-vocals/{song_id}/{voice_part}"
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        tmp.write(vocal_bytes)
+        tmp_vocal_path = tmp.name
+    try:
+        isolated_url = _upload_to_s3(
+            tmp_vocal_path,
+            f"{s3_prefix}/{ref_id}_isolated.wav",
+            content_type="audio/wav",
+        )
+    finally:
+        os.unlink(tmp_vocal_path)
+
+    features_url = _upload_json_to_s3(
+        features,
+        f"{s3_prefix}/{ref_id}_features.json",
+    )
+
+    duration_ms = int(features["duration_s"] * 1000)
+
+    # Create ReferenceVocal record
+    conn = _get_db_conn()
+    try:
+        with conn.cursor() as cur:
+            now = datetime.now(timezone.utc)
+            cur.execute(
+                '''
+                INSERT INTO "ReferenceVocal" (
+                    id, "songId", "voicePart", "sourceTrackId",
+                    "isolatedFileUrl", "featuresFileUrl", "durationMs",
+                    "demucsModel", status, "createdAt", "updatedAt"
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ''',
+                (
+                    ref_id, song_id, voice_part, track_id,
+                    isolated_url, features_url, duration_ms,
+                    "htdemucs_ft", "READY", now, now,
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    logger.info(
+        "Auto-created reference %s for song %s part %s",
+        ref_id, song_id, voice_part,
+    )
+    return {"features": features, "referenceVocalId": ref_id}
 
 
 # ---------------------------------------------------------------------------
@@ -529,6 +657,26 @@ def run_scoring_and_coaching(
     }
 
 
+@app.function(timeout=120)
+def run_standalone_scoring_and_coaching(
+    user_features: dict,
+    voice_part: str,
+    song_title: Optional[str] = None,
+) -> dict:
+    """Score a recording without reference (standalone analysis)."""
+    from scoring import score_standalone
+    from coaching import generate_coaching_tips
+
+    scores = score_standalone(user_features)
+    coaching_tips = generate_coaching_tips(
+        scores=scores,
+        problem_areas=scores.get("problemAreas", []),
+        voice_part=voice_part,
+        song_title=song_title,
+    )
+    return {"scores": scores, "coachingTips": coaching_tips}
+
+
 # ---------------------------------------------------------------------------
 # FastAPI endpoints
 # ---------------------------------------------------------------------------
@@ -593,31 +741,65 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
             logger.info("Headphones used -- skipping vocal isolation")
             vocal_bytes = recording_bytes
 
+        # 3b. Upload isolated vocal to S3 for frontend playback
+        isolated_s3_key = (
+            f"vocal-recordings/{req.userId}/{req.songId}/"
+            f"{req.jobId}_isolated.wav"
+        )
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp.write(vocal_bytes)
+            tmp_vocal_path = tmp.name
+        try:
+            isolated_vocal_url = _upload_to_s3(
+                tmp_vocal_path,
+                isolated_s3_key,
+                content_type="audio/wav",
+            )
+        finally:
+            os.unlink(tmp_vocal_path)
+        logger.info("Uploaded isolated vocal: %s", isolated_s3_key)
+
         # 4. Extract user features
         user_features = run_feature_extraction.remote(vocal_bytes, "vocal.wav")
 
-        # 5. Load reference features
+        # 5. Load reference features (or auto-create)
         ref_features = None
-        if req.referenceVocalId:
-            features_url = _get_reference_features_url(req.referenceVocalId)
+        reference_vocal_id = req.referenceVocalId
+
+        if reference_vocal_id:
+            features_url = _get_reference_features_url(reference_vocal_id)
             if features_url:
                 ref_features = _download_json_from_s3(features_url)
+
         if ref_features is None:
             features_url = _find_reference_for_song(req.songId, req.voicePart)
             if features_url:
                 ref_features = _download_json_from_s3(features_url)
 
         if ref_features is None:
-            raise ValueError(
-                f"No ready reference vocal found for song={req.songId} "
-                f"part={req.voicePart}"
+            # Try to auto-create reference from song's audio tracks
+            logger.info(
+                "No reference found, attempting auto-creation from audio tracks"
             )
+            ref_result = _auto_create_reference(req.songId, req.voicePart)
+            if ref_result:
+                ref_features = ref_result["features"]
+                reference_vocal_id = ref_result["referenceVocalId"]
 
         # 6 + 7. Score and generate coaching tips
         song_title = _get_song_title(req.songId)
-        result = run_scoring_and_coaching.remote(
-            user_features, ref_features, req.voicePart, song_title
-        )
+
+        if ref_features is not None:
+            # Normal comparison against reference
+            result = run_scoring_and_coaching.remote(
+                user_features, ref_features, req.voicePart, song_title
+            )
+        else:
+            # No reference available at all -- do standalone analysis
+            logger.info("No reference available, running standalone analysis")
+            result = run_standalone_scoring_and_coaching.remote(
+                user_features, req.voicePart, song_title
+            )
 
         scores = result["scores"]
         coaching_tips = result["coachingTips"]
@@ -630,15 +812,15 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
             song_id=req.songId,
             voice_part=req.voicePart,
             recording_s3_key=req.recordingS3Key,
-            reference_vocal_id=req.referenceVocalId,
+            reference_vocal_id=reference_vocal_id,
             scores=scores,
             coaching_tips=coaching_tips,
             duration_ms=req.recordingDurationMs,
             xp_earned=xp_earned,
+            isolated_vocal_url=isolated_vocal_url,
         )
 
-        # Award XP to the user
-        _award_xp(req.userId, xp_earned)
+        # XP awarding is handled by the Next.js side when polling detects COMPLETED
 
         # 9. Update job to COMPLETED
         _update_job_status(req.jobId, "COMPLETED", practice_session_id=session_id)
@@ -661,6 +843,7 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
             "dynamicsScore": scores["dynamicsScore"],
             "coachingTips": coaching_tips,
             "xpEarned": xp_earned,
+            "isolatedVocalUrl": isolated_vocal_url,
         }
 
     except Exception as exc:

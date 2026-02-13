@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { checkAndUnlockAchievements } from '@/lib/achievement-checker'
 
 // POST /api/practice/review — submit a single chunk review
 export async function POST(request: NextRequest) {
@@ -183,14 +184,23 @@ export async function POST(request: NextRequest) {
         },
       })
 
-      return progress
+      // Check achievements
+      const unlockedAchievements = await checkAndUnlockAchievements(tx, userId, {
+        type: 'chunk_practice',
+        songId: progress.chunk.song.id,
+        chunkCount: 1,
+        perfectCount: selfRating === 'nailed_it' ? 1 : 0,
+      })
+
+      return { progress, unlockedAchievements }
     })
 
     return NextResponse.json({
-      progress: result,
+      progress: result.progress,
       xpEarned,
       nextReviewAt,
       intervalDays: newIntervalDays,
+      unlockedAchievements: result.unlockedAchievements,
     })
   } catch (error) {
     console.error('POST /api/practice/review error:', error)

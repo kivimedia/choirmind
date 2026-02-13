@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 import Link from 'next/link'
 import Navbar from '@/components/layout/Navbar'
 import Button from '@/components/ui/Button'
+import ToastContainer from '@/components/ui/ToastContainer'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession()
@@ -57,6 +58,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="mx-auto max-w-6xl">{children}</div>
         </main>
       </div>
+      <ToastContainer />
     </div>
   )
 }

@@ -17,6 +17,7 @@ interface ChoirData {
   inviteCode: string
   locale: string
   weekStart: string
+  leaderboardEnabled: boolean
   _count: { members: number; songs: number }
 }
 
@@ -51,6 +52,7 @@ export default function ChoirManagePage() {
   const [name, setName] = useState('')
   const [locale, setLocale] = useState('')
   const [weekStart, setWeekStart] = useState('')
+  const [leaderboardEnabled, setLeaderboardEnabled] = useState(true)
   const [saving, setSaving] = useState(false)
   const [copied, setCopied] = useState(false)
 
@@ -78,6 +80,7 @@ export default function ChoirManagePage() {
         setName(data.choir.name)
         setLocale(data.choir.locale)
         setWeekStart(data.choir.weekStart)
+        setLeaderboardEnabled(data.choir.leaderboardEnabled ?? true)
       } else if (choirRes.status === 403) {
         setError('אין הרשאת גישה')
       }
@@ -105,7 +108,7 @@ export default function ChoirManagePage() {
       const res = await fetch(`/api/choir/${choirId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, locale, weekStart }),
+        body: JSON.stringify({ name, locale, weekStart, leaderboardEnabled }),
       })
       if (!res.ok) {
         const data = await res.json()
@@ -325,6 +328,29 @@ export default function ChoirManagePage() {
                 { value: 'monday', label: t('monday') },
               ]}
             />
+          </div>
+
+          {/* Leaderboard toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-foreground">טבלת דירוג</p>
+              <p className="text-xs text-text-muted">הצגת טבלת דירוג XP לחברי המקהלה</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={leaderboardEnabled}
+              onClick={() => setLeaderboardEnabled(!leaderboardEnabled)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                leaderboardEnabled ? 'bg-primary' : 'bg-border'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                  leaderboardEnabled ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
           </div>
 
           <div className="flex justify-end">

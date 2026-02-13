@@ -28,12 +28,16 @@ export async function GET() {
       })
     }
 
+    const isSubscribed = !!(quota.stripeCurrentPeriodEnd
+      && new Date(quota.stripeCurrentPeriodEnd) > new Date())
+
     return NextResponse.json({
       freeSecondsUsed: quota.freeSecondsUsed,
       freeSecondsLimit: quota.freeSecondsLimit,
       freeSecondsRemaining: Math.max(0, quota.freeSecondsLimit - quota.freeSecondsUsed),
       subscriptionTier: quota.subscriptionTier,
-      subscriptionExpiresAt: quota.subscriptionExpiresAt,
+      subscriptionExpiresAt: quota.subscriptionExpiresAt ?? quota.stripeCurrentPeriodEnd,
+      isSubscribed,
     })
   } catch (error) {
     console.error('[vocal-analysis/quota GET]', error)

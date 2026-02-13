@@ -40,6 +40,9 @@ model User {
   vocalAnalysisJobs       VocalAnalysisJob[]
   vocalPracticeSessions   VocalPracticeSession[]
   vocalQuota              UserVocalQuota?
+
+  // Stripe
+  stripeCustomerId        String?   @unique
 }
 
 model Account {
@@ -86,9 +89,17 @@ model Choir {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  members     ChoirMember[]
-  songs       Song[]
-  assignments Assignment[]
+  members                    ChoirMember[]
+  songs                      Song[]
+  assignments                Assignment[]
+
+  // Gamification
+  leaderboardEnabled         Boolean  @default(true)
+
+  // Stripe choir subscription
+  stripeSubscriptionId       String?
+  stripeCurrentPeriodEnd     DateTime?
+  maxMembers                 Int?     @default(50)
 }
 
 model ChoirMember {
@@ -333,13 +344,16 @@ model VocalPracticeSession {
 
 model UserVocalQuota {
   id                    String    @id @default(uuid())
-  userId                String    @unique
-  freeSecondsUsed       Int       @default(0)
-  freeSecondsLimit      Int       @default(3600)
-  subscriptionTier      String?
-  subscriptionExpiresAt DateTime?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  userId                 String    @unique
+  freeSecondsUsed        Int       @default(0)
+  freeSecondsLimit       Int       @default(3600)
+  subscriptionTier       String?
+  subscriptionExpiresAt  DateTime?
+  stripeSubscriptionId   String?
+  stripeCurrentPeriodEnd DateTime?
+  stripePriceId          String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

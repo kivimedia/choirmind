@@ -6,7 +6,9 @@ import Modal from '@/components/ui/Modal'
 import ScoreDial from './ScoreDial'
 import ScoreBreakdown from './ScoreBreakdown'
 import CoachingTipCard from './CoachingTipCard'
+import SectionTimeline from './SectionTimeline'
 import { useVocalRecorder } from '@/hooks/useVocalRecorder'
+import { useHeadphoneDetection } from '@/hooks/useHeadphoneDetection'
 import type { AudioActions } from '@/components/audio/AudioPlayer'
 
 // ---------------------------------------------------------------------------
@@ -21,6 +23,25 @@ interface ChunkInfo {
   audioEndMs?: number | null
 }
 
+interface SectionScoreData {
+  sectionIndex: number
+  startTime: number
+  endTime: number
+  overallScore: number
+  pitchScore: number
+  timingScore: number
+  dynamicsScore: number
+}
+
+interface ProblemArea {
+  startTime: number
+  endTime: number
+  issues: string[]
+  avgPitchDevCents: number
+  avgTimingOffsetMs: number
+  avgEnergyRatio: number
+}
+
 interface SessionResult {
   overallScore: number
   pitchScore: number
@@ -28,6 +49,9 @@ interface SessionResult {
   dynamicsScore: number
   coachingTips: string[]
   xpEarned: number
+  sectionScores: SectionScoreData[]
+  problemAreas: ProblemArea[]
+  isolatedVocalUrl?: string
 }
 
 interface ChunkRecordingPanelProps {
@@ -97,8 +121,16 @@ export default function ChunkRecordingPanel({
   hasAudio,
 }: ChunkRecordingPanelProps) {
   const recorder = useVocalRecorder()
+  const { isHeadphones, isDetecting } = useHeadphoneDetection()
   const [step, setStep] = useState<Step>('ready')
   const [withBacking, setWithBacking] = useState(true)
+
+  // Auto-set withBacking based on headphone detection
+  useEffect(() => {
+    if (isHeadphones !== null && !isDetecting) {
+      setWithBacking(isHeadphones)
+    }
+  }, [isHeadphones, isDetecting])
   const [jobId, setJobId] = useState<string | null>(null)
   const [result, setResult] = useState<SessionResult | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -157,36 +189,23 @@ export default function ChunkRecordingPanel({
       setStep('uploading')
       try {
         const blob = recorder.audioBlob!
-        const baseType = blob.type.split(';')[0].trim()
-        const ext = baseType.includes('webm') ? 'webm' : 'mp4'
 
-        // Get presigned URL with timeout
-        const presignRes = await fetch('/api/vocal-analysis/upload-presign', {
+        // Upload via server-side proxy (avoids S3 CORS issues)
+        const formData = new FormData()
+        formData.append('file', blob, `chunk-${chunk.id}.webm`)
+        formData.append('songId', songId)
+        formData.append('voicePart', voicePart)
+
+        const uploadRes = await fetch('/api/vocal-analysis/upload', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            songId,
-            voicePart,
-            filename: `chunk-${chunk.id}.${ext}`,
-            contentType: blob.type,
-            durationMs: recorder.durationMs,
-          }),
+          body: formData,
           signal: controller.signal,
         })
-        if (!presignRes.ok) {
-          const errData = await presignRes.json().catch(() => ({}))
-          throw new Error(errData.error || `Presign failed (${presignRes.status})`)
+        if (!uploadRes.ok) {
+          const errData = await uploadRes.json().catch(() => ({}))
+          throw new Error(errData.error || `Upload failed (${uploadRes.status})`)
         }
-        const { uploadUrl, key } = await presignRes.json()
-
-        // Upload to S3
-        const uploadRes = await fetch(uploadUrl, {
-          method: 'PUT',
-          body: blob,
-          headers: { 'Content-Type': baseType },
-          signal: controller.signal,
-        })
-        if (!uploadRes.ok) throw new Error(`S3 upload failed (${uploadRes.status})`)
+        const { key } = await uploadRes.json()
 
         // Create analysis job
         const jobRes = await fetch('/api/vocal-analysis/jobs', {
@@ -205,7 +224,44 @@ export default function ChunkRecordingPanel({
           const err = await jobRes.json().catch(() => ({}))
           throw new Error(err.error || `Job failed (${jobRes.status})`)
         }
-        const job = await jobRes.json()
+        const data = await jobRes.json()
+        const job = data.job ?? data
+
+        // If already completed (mock mode), show results immediately
+        if (job.status === 'COMPLETED' && job.practiceSession) {
+          const ps = job.practiceSession
+
+          // Parse sectionScores - could be JSON string with {sections, isolatedVocalUrl} or plain array
+          let sectionScores: SectionScoreData[] = []
+          let isolatedVocalUrl: string | undefined
+          try {
+            const rawSections = ps.sectionScores ? JSON.parse(ps.sectionScores) : []
+            if (Array.isArray(rawSections)) {
+              sectionScores = rawSections
+            } else if (rawSections.sections) {
+              sectionScores = rawSections.sections
+              isolatedVocalUrl = rawSections.isolatedVocalUrl
+            }
+          } catch {}
+
+          let problemAreas: ProblemArea[] = []
+          try { problemAreas = JSON.parse(ps.problemAreas || '[]') } catch {}
+
+          setResult({
+            overallScore: ps.overallScore,
+            pitchScore: ps.pitchScore,
+            timingScore: ps.timingScore,
+            dynamicsScore: ps.dynamicsScore,
+            coachingTips: JSON.parse(ps.coachingTips || '[]'),
+            xpEarned: ps.xpEarned,
+            sectionScores,
+            problemAreas,
+            isolatedVocalUrl,
+          })
+          setStep('results')
+          return
+        }
+
         setJobId(job.id)
         setStep('analyzing')
       } catch (err) {
@@ -244,6 +300,23 @@ export default function ChunkRecordingPanel({
 
         if (job.status === 'COMPLETED' && job.practiceSession) {
           const ps = job.practiceSession
+
+          // Parse sectionScores - could be JSON string with {sections, isolatedVocalUrl} or plain array
+          let sectionScores: SectionScoreData[] = []
+          let isolatedVocalUrl: string | undefined
+          try {
+            const rawSections = ps.sectionScores ? JSON.parse(ps.sectionScores) : []
+            if (Array.isArray(rawSections)) {
+              sectionScores = rawSections
+            } else if (rawSections.sections) {
+              sectionScores = rawSections.sections
+              isolatedVocalUrl = rawSections.isolatedVocalUrl
+            }
+          } catch {}
+
+          let problemAreas: ProblemArea[] = []
+          try { problemAreas = JSON.parse(ps.problemAreas || '[]') } catch {}
+
           setResult({
             overallScore: ps.overallScore,
             pitchScore: ps.pitchScore,
@@ -251,6 +324,9 @@ export default function ChunkRecordingPanel({
             dynamicsScore: ps.dynamicsScore,
             coachingTips: JSON.parse(ps.coachingTips || '[]'),
             xpEarned: ps.xpEarned,
+            sectionScores,
+            problemAreas,
+            isolatedVocalUrl,
           })
           setStep('results')
           if (pollRef.current) clearInterval(pollRef.current)
@@ -289,6 +365,15 @@ export default function ChunkRecordingPanel({
         {/* ==================== Ready ==================== */}
         {step === 'ready' && (
           <div className="space-y-4">
+            {/* Headphone detection status */}
+            {!isDetecting && isHeadphones !== null && (
+              <p className="text-xs text-text-muted">
+                {isHeadphones
+                  ? '🎧 זוהו אוזניות — מוזיקה תנוגן ברקע'
+                  : '🔊 לא זוהו אוזניות — בידוד קולי פעיל'}
+              </p>
+            )}
+
             {/* Backing track toggle */}
             {hasAudio && (
               <label className="flex items-center gap-3 cursor-pointer">
@@ -399,6 +484,61 @@ export default function ChunkRecordingPanel({
               timingScore={result.timingScore}
               dynamicsScore={result.dynamicsScore}
             />
+
+            {result.sectionScores.length > 0 && (
+              <SectionTimeline
+                sections={result.sectionScores.map(s => ({
+                  label: `קטע ${s.sectionIndex + 1}`,
+                  score: s.overallScore,
+                  startMs: s.startTime * 1000,
+                  endMs: s.endTime * 1000,
+                }))}
+                totalDurationMs={result.sectionScores.length > 0
+                  ? result.sectionScores[result.sectionScores.length - 1].endTime * 1000
+                  : 1}
+              />
+            )}
+
+            {result.problemAreas.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-foreground">{'אזורים לשיפור'}</h3>
+                {result.problemAreas.map((area, i) => {
+                  const issueLabels: Record<string, string> = {
+                    pitch: 'גובה',
+                    timing: 'תזמון',
+                    dynamics: 'דינמיקה',
+                  }
+                  return (
+                    <div key={i} className="rounded-lg border border-border bg-surface p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-foreground" dir="ltr">
+                          {area.startTime.toFixed(1)}s - {area.endTime.toFixed(1)}s
+                        </span>
+                        <div className="flex gap-1">
+                          {area.issues.map(issue => (
+                            <span key={issue} className="rounded-full bg-status-shaky/20 px-2 py-0.5 text-xs text-status-shaky">
+                              {issueLabels[issue] || issue}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {result.isolatedVocalUrl && (
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-foreground">{'הקול המבודד שלך'}</h3>
+                <audio
+                  controls
+                  src={result.isolatedVocalUrl}
+                  className="w-full h-10"
+                  preload="none"
+                />
+              </div>
+            )}
 
             {result.coachingTips.length > 0 && (
               <CoachingTipCard tips={result.coachingTips} />
