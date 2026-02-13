@@ -170,45 +170,8 @@ export default function ChunkRecordingPanel({
   const [backingPlaying, setBackingPlaying] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
-  // Standalone Audio element for backing track (bypasses Howler pool issues)
+  // DOM-attached <audio> element ref for backing track
   const backingRef = useRef<HTMLAudioElement | null>(null)
-
-  // Preload backing track when modal opens (so it's ready to play instantly)
-  useEffect(() => {
-    if (!isOpen || !hasAudio || !backingTrackUrl) {
-      // Cleanup
-      if (backingRef.current) {
-        backingRef.current.pause()
-        backingRef.current.removeAttribute('src')
-        backingRef.current.load()
-        backingRef.current = null
-      }
-      setBackingPlaying(false)
-      return
-    }
-
-    const audio = new Audio()
-    audio.preload = 'auto'
-    audio.src = backingTrackUrl
-
-    audio.addEventListener('playing', () => setBackingPlaying(true))
-    audio.addEventListener('pause', () => setBackingPlaying(false))
-    audio.addEventListener('ended', () => setBackingPlaying(false))
-    audio.addEventListener('error', (e) => {
-      console.error('[ChunkRecording] Backing track error:', e, 'src:', backingTrackUrl)
-      setBackingPlaying(false)
-    })
-
-    backingRef.current = audio
-
-    return () => {
-      audio.pause()
-      audio.removeAttribute('src')
-      audio.load()
-      backingRef.current = null
-      setBackingPlaying(false)
-    }
-  }, [isOpen, hasAudio, backingTrackUrl])
 
   // Reset when modal closes
   useEffect(() => {
@@ -228,17 +191,17 @@ export default function ChunkRecordingPanel({
   const handleStartRecording = useCallback(async () => {
     setErrorMsg(null)
 
-    // Play preloaded backing track — must happen BEFORE getUserMedia
-    // to stay within user-gesture context
+    // Play backing track BEFORE getUserMedia to stay in user-gesture context.
+    // Do NOT await — fire-and-forget so we don't lose the gesture.
     if (withBacking && backingRef.current) {
       backingRef.current.currentTime = 0
-      try {
-        await backingRef.current.play()
-      } catch (err) {
-        console.warn('[ChunkRecording] Backing track play failed:', err)
-        // Don't block recording — show a warning but continue
-        setErrorMsg('לא ניתן להפעיל מוזיקה ברקע — נסו ללחוץ שוב')
-      }
+      backingRef.current.play()
+        .then(() => setBackingPlaying(true))
+        .catch((err: unknown) => {
+          console.warn('[ChunkRecording] Backing track play failed:', err)
+          setErrorMsg('לא ניתן להפעיל מוזיקה ברקע')
+          setBackingPlaying(false)
+        })
     }
 
     try {
@@ -381,6 +344,17 @@ export default function ChunkRecordingPanel({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`${chunk.label}`} resizable>
+      {/* Hidden audio element for backing track — DOM-attached for reliable playback */}
+      {hasAudio && backingTrackUrl && (
+        <audio
+          ref={backingRef}
+          src={backingTrackUrl}
+          preload="auto"
+          onPause={() => setBackingPlaying(false)}
+          onEnded={() => setBackingPlaying(false)}
+          style={{ display: 'none' }}
+        />
+      )}
       <div className="space-y-4">
         {/* Chunk lyrics */}
         <div
