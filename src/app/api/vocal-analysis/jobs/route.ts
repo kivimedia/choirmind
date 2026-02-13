@@ -192,10 +192,13 @@ export async function POST(request: NextRequest) {
     // Trigger the Python vocal analysis service
     const vocalServiceUrl = process.env.VOCAL_SERVICE_URL
     if (vocalServiceUrl) {
-      // Fire-and-forget: try real service, fall back to mock on failure
+      // Fire-and-forget with 15s timeout: if service doesn't respond, fall back to mock
+      const abortCtrl = new AbortController()
+      const timeout = setTimeout(() => abortCtrl.abort(), 15_000)
       fetch(`${vocalServiceUrl}/api/v1/process-vocal-analysis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortCtrl.signal,
         body: JSON.stringify({
           jobId: job.id,
           userId,
@@ -206,13 +209,16 @@ export async function POST(request: NextRequest) {
           useHeadphones: job.useHeadphones,
         }),
       }).then(async (res) => {
+        clearTimeout(timeout)
         if (!res.ok) {
           console.error('[vocal-analysis/jobs] Service error, falling back to mock:', res.status)
           await generateMockResults(job.id, userId, songId, voicePart, recordingS3Key, recordingDurationMs)
             .catch((e) => console.error('[vocal-analysis/jobs] Mock fallback failed:', e))
         }
+        // If res.ok, the service is handling it — it will update the DB directly
       }).catch(async (err) => {
-        console.error('[vocal-analysis/jobs] Service unreachable, falling back to mock:', err)
+        clearTimeout(timeout)
+        console.error('[vocal-analysis/jobs] Service failed/timeout, falling back to mock:', err?.message)
         await generateMockResults(job.id, userId, songId, voicePart, recordingS3Key, recordingDurationMs)
           .catch((e) => console.error('[vocal-analysis/jobs] Mock fallback failed:', e))
       })

@@ -128,12 +128,7 @@ export default function ChunkRecordingPanel({
   const [step, setStep] = useState<Step>('ready')
   const [withBacking, setWithBacking] = useState(true)
 
-  // Auto-set withBacking based on headphone detection
-  useEffect(() => {
-    if (isHeadphones !== null && !isDetecting) {
-      setWithBacking(isHeadphones)
-    }
-  }, [isHeadphones, isDetecting])
+  // withBacking defaults to true — user can toggle manually
   const [jobId, setJobId] = useState<string | null>(null)
   const [result, setResult] = useState<SessionResult | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -165,17 +160,16 @@ export default function ChunkRecordingPanel({
   const handleStartRecording = useCallback(async () => {
     setErrorMsg(null)
 
-    // Start backing track FIRST while still in user-gesture context
-    // Use standalone Audio element to avoid Howler pool exhaustion
+    // Start backing track using a standalone Audio element (bypasses Howler pool issues)
+    // Must happen BEFORE getUserMedia to stay in user-gesture context
     if (withBacking && hasAudio && backingTrackUrl) {
-      try {
-        const audio = new Audio(backingTrackUrl)
-        audio.currentTime = (chunk.audioStartMs ?? 0) / 1000
-        await audio.play()
-        backingRef.current = audio
-      } catch (err) {
-        console.warn('[ChunkRecording] Backing track play failed:', err)
-      }
+      const audio = new Audio(backingTrackUrl)
+      backingRef.current = audio
+      // play() returns a promise — don't await it so we don't block recording
+      audio.play().catch((err) => {
+        console.warn('[ChunkRecording] Backing track failed:', err)
+        setErrorMsg('לא ניתן להפעיל מוזיקה ברקע')
+      })
     }
 
     try {
@@ -390,12 +384,10 @@ export default function ChunkRecordingPanel({
         {/* ==================== Ready ==================== */}
         {step === 'ready' && (
           <div className="space-y-4">
-            {/* Headphone detection status */}
-            {!isDetecting && isHeadphones !== null && (
+            {/* Tip: backing track works best with headphones */}
+            {hasAudio && (
               <p className="text-xs text-text-muted">
-                {isHeadphones
-                  ? '🎧 זוהו אוזניות — מוזיקה תנוגן ברקע'
-                  : '🔊 לא זוהו אוזניות — בידוד קולי פעיל'}
+                {'💡 מומלץ להשתמש באוזניות כדי שהמוזיקה לא תיקלט בהקלטה'}
               </p>
             )}
 
