@@ -129,27 +129,37 @@ def extract_features(audio_path: str, sr: int = 22050) -> dict:
         Dictionary with pitch_values, pitch_times, onset_times,
         rms_values, rms_times, and duration_s.
     """
+    import time as _time
     logger.info("Extracting features from %s (sr=%d)", audio_path, sr)
 
+    t0 = _time.time()
     y, sr = librosa.load(audio_path, sr=sr)
     duration_s = len(y) / sr
+    logger.info("[FEAT] librosa.load: %.1fs", _time.time() - t0)
 
     # -- Pitch extraction via Parselmouth (Praat) --
-    snd = parselmouth.Sound(audio_path)
-    pitch_obj = snd.to_pitch(time_step=0.01)
+    # Use 0.02s time step (50fps) instead of 0.01s — halves frames, minimal quality loss
+    t1 = _time.time()
+    snd = parselmouth.Sound(y, sampling_frequency=sr)  # reuse loaded audio, avoid re-reading file
+    pitch_obj = snd.to_pitch(time_step=0.02)
     pitch_values = pitch_obj.selected_array["frequency"]
     pitch_times = pitch_obj.xs()
+    logger.info("[FEAT] praat pitch: %.1fs (%d frames)", _time.time() - t1, len(pitch_values))
 
     # Replace unvoiced (0 Hz) with NaN for downstream processing
     pitch_values_clean = np.where(pitch_values == 0, np.nan, pitch_values)
 
     # -- Onset detection --
+    t2 = _time.time()
     onset_frames = librosa.onset.onset_detect(y=y, sr=sr, units="frames")
     onset_times = librosa.frames_to_time(onset_frames, sr=sr)
+    logger.info("[FEAT] onsets: %.1fs (%d onsets)", _time.time() - t2, len(onset_times))
 
     # -- RMS energy --
+    t3 = _time.time()
     rms = librosa.feature.rms(y=y)[0]
     rms_times = librosa.frames_to_time(np.arange(len(rms)), sr=sr)
+    logger.info("[FEAT] rms: %.1fs", _time.time() - t3)
 
     # Normalise RMS to 0-1 range for comparability
     rms_max = rms.max()

@@ -57,17 +57,13 @@ image = (
         "demucs",
     )
     .env({"TORCHAUDIO_BACKEND": "soundfile"})
-    # Pre-download Demucs model into image so it's not fetched at runtime.
-    # Downloads both checkpoint files to the torch hub cache.
+    # Pre-download all 4 Demucs htdemucs_ft checkpoint files into the image.
     .run_commands(
         "python -c \""
         "import torch; "
-        "torch.hub.load_state_dict_from_url("
-        "'https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/f7e0c4bc-ba3fe64a.th', "
-        "map_location='cpu'); "
-        "torch.hub.load_state_dict_from_url("
-        "'https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/d12395a8-e57c48e6.th', "
-        "map_location='cpu')"
+        "base='https://dl.fbaipublicfiles.com/demucs/hybrid_transformer'; "
+        "[torch.hub.load_state_dict_from_url(f'{base}/{n}.th', map_location='cpu') "
+        "for n in ['f7e0c4bc-ba3fe64a','d12395a8-e57c48e6','92cfc3b6-ef3bcb9c','04573f0d-f3cf25b2']]"
         "\""
     )
     .add_local_file("processing.py", "/root/processing.py")
@@ -697,6 +693,11 @@ def run_demucs_isolation(audio_bytes: bytes, filename: str) -> dict:
 @app.function(timeout=300)
 def run_feature_extraction(audio_bytes: bytes, filename: str) -> dict:
     """Extract pitch, onset, and energy features from audio bytes."""
+    return _extract_features_local(audio_bytes, filename)
+
+
+def _extract_features_local(audio_bytes: bytes, filename: str) -> dict:
+    """Extract features in-process (no container spawn overhead)."""
     from processing import extract_features
 
     with tempfile.NamedTemporaryFile(
@@ -834,9 +835,20 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
         t0 = time.time()
         timings: dict[str, float] = {}
 
-        # 1. Mark job as PROCESSING
-        _update_job_status(req.jobId, "PROCESSING")
-        _update_job_stage(req.jobId, "downloading")
+        # 1. Mark job as PROCESSING + set initial stage in one DB call
+        conn = _get_db_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE "VocalAnalysisJob"
+                       SET status = 'PROCESSING', stage = 'downloading',
+                           "startedAt" = NOW(), attempts = attempts + 1
+                       WHERE id = %s""",
+                    (req.jobId,),
+                )
+            conn.commit()
+        finally:
+            conn.close()
 
         # 2. Download recording from S3
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -893,7 +905,7 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
             # Extract features
             t3 = time.time()
             _update_job_stage(req.jobId, "extracting")
-            feats = run_feature_extraction.remote(vb, "vocal.wav")
+            feats = _extract_features_local(vb, "vocal.wav")
             timings["extract"] = time.time() - t3
             logger.info("[PROFILE] extract_features: %.1fs", timings["extract"])
 
