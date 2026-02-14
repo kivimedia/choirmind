@@ -48,15 +48,29 @@ async function fetchSongs(
       audioTracks: {
         select: { id: true, voicePart: true },
       },
-      referenceVocals: {
-        where: { status: 'READY', isolatedFileUrl: { not: '' } },
-        select: { id: true },
-      },
     },
     orderBy: { createdAt: 'desc' as const },
   })
 
-  console.log('[songs-cache] fetched', songs.length, 'songs, referenceVocals sample:', songs.slice(0, 3).map(s => ({ id: s.id, title: s.title, rvCount: (s as any).referenceVocals?.length })))
+  // Count stems per song via raw SQL (more reliable than Prisma include with where)
+  const songIds = songs.map((s) => s.id)
+  let stemMap = new Map<string, number>()
+  if (songIds.length > 0) {
+    try {
+      const rows = await prisma.$queryRawUnsafe<{ songId: string; cnt: bigint }[]>(
+        `SELECT "songId", COUNT(*) as cnt
+         FROM "ReferenceVocal"
+         WHERE "songId" = ANY($1::text[])
+           AND status = 'READY'
+           AND "isolatedFileUrl" != ''
+         GROUP BY "songId"`,
+        songIds
+      )
+      stemMap = new Map(rows.map((r) => [r.songId, Number(r.cnt)]))
+    } catch (e) {
+      console.error('[songs-cache] stems count query failed:', e)
+    }
+  }
 
   return songs.map((song) => ({
     id: song.id,
@@ -72,7 +86,7 @@ async function fetchSongs(
     hasLyrics: song.chunks.some((c) => c.lyrics?.trim()),
     allSynced: song.chunks.length > 0 && song.chunks.every((c) => c.lineTimestamps),
     hasUnsynced: song.chunks.some((c) => c.lyrics?.trim() && !c.lineTimestamps),
-    stemsCount: (song as any).referenceVocals?.length ?? 0,
+    stemsCount: stemMap.get(song.id) ?? 0,
   }))
 }
 
@@ -84,11 +98,11 @@ export function getCachedSongs(
 ) {
   return unstable_cache(
     () => fetchSongs(choirIds, filterChoirId, userId, showArchived),
-    ['songs-v2', userId, choirIds.sort().join(','), filterChoirId ?? '', String(showArchived)],
-    { tags: ['songs-v2'] }
+    ['songs-v3', userId, choirIds.sort().join(','), filterChoirId ?? '', String(showArchived)],
+    { tags: ['songs-v3'] }
   )()
 }
 
 export function invalidateSongsCache() {
-  revalidateTag('songs-v2', 'max')
+  revalidateTag('songs-v3', 'max')
 }

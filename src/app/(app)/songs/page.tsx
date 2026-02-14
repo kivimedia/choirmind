@@ -769,7 +769,7 @@ export default function SongsPage() {
                   : 'bg-surface-hover text-foreground hover:bg-border',
               ].join(' ')}
             >
-              שירה מבודדת
+              סטמים
             </button>
           </div>
         </div>
