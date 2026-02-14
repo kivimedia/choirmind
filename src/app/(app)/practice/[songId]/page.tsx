@@ -471,6 +471,16 @@ export default function PracticeSessionPage() {
   // -- Active practice (continuous karaoke) --
   return (
     <div dir="rtl" className="flex flex-col min-h-[calc(100dvh-8rem)] text-start">
+      {/* Back to song page */}
+      <button
+        type="button"
+        onClick={() => router.push(`/songs/${songId}`)}
+        className="mb-2 flex items-center gap-1 text-sm text-text-muted hover:text-foreground transition-colors self-start"
+      >
+        <span className="text-base leading-none">{'\u2190'}</span>
+        <span>{'חזרה לשיר'}</span>
+      </button>
+
       {/* Top: Compact header + controls */}
       <div className="mb-3 shrink-0">
         <FadeLevelIndicator
