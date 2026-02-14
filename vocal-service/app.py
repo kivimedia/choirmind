@@ -57,6 +57,8 @@ image = (
         "demucs",
     )
     .env({"TORCHAUDIO_BACKEND": "soundfile"})
+    # Pre-download Demucs model into image so it's not fetched at runtime
+    .run_commands("python -c \"from demucs.pretrained import get_model; get_model('htdemucs_ft')\"")
     .add_local_file("processing.py", "/root/processing.py")
     .add_local_file("scoring.py", "/root/scoring.py")
     .add_local_file("coaching.py", "/root/coaching.py")
@@ -836,75 +838,92 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
         timings["download"] = time.time() - t0
         logger.info("[PROFILE] download: %.1fs (%.1fMB)", timings["download"], len(recording_bytes) / 1e6)
 
-        # 3. Vocal isolation if needed
-        t1 = time.time()
-        _update_job_stage(req.jobId, "isolating")
-        if not req.useHeadphones:
-            logger.info("Running Demucs vocal isolation (no headphones)")
-            demucs_result = run_demucs_isolation.remote(
-                recording_bytes, "recording.wav"
+        # 3-5: Isolate/convert + extract features + load reference IN PARALLEL
+        # Reference loading is independent of isolation/extraction, so we run
+        # them concurrently to save time.
+        from concurrent.futures import ThreadPoolExecutor, Future
+
+        def _isolate_and_extract():
+            """Steps 3+4: isolate vocals (or convert) then extract features."""
+            t1 = time.time()
+            _update_job_stage(req.jobId, "isolating")
+            if not req.useHeadphones:
+                logger.info("Running Demucs vocal isolation (no headphones)")
+                demucs_result = run_demucs_isolation.remote(
+                    recording_bytes, "recording.wav"
+                )
+                vb = demucs_result["vocals"]
+            else:
+                logger.info("Headphones used -- skipping vocal isolation, converting to WAV")
+                vb = _convert_to_wav(recording_bytes)
+            timings["isolate"] = time.time() - t1
+            logger.info("[PROFILE] isolate: %.1fs", timings["isolate"])
+
+            # Upload isolated vocal to S3 for frontend playback
+            t2 = time.time()
+            isolated_s3_key = (
+                f"vocal-recordings/{req.userId}/{req.songId}/"
+                f"{req.jobId}_isolated.wav"
             )
-            vocal_bytes = demucs_result["vocals"]
-        else:
-            logger.info("Headphones used -- skipping vocal isolation, converting to WAV")
-            vocal_bytes = _convert_to_wav(recording_bytes)
-        timings["isolate"] = time.time() - t1
-        logger.info("[PROFILE] isolate: %.1fs", timings["isolate"])
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp.write(vb)
+                tmp_vocal_path = tmp.name
+            try:
+                iso_url = _upload_to_s3(
+                    tmp_vocal_path,
+                    isolated_s3_key,
+                    content_type="audio/wav",
+                )
+            finally:
+                os.unlink(tmp_vocal_path)
+            timings["upload_isolated"] = time.time() - t2
+            logger.info("[PROFILE] upload_isolated: %.1fs", timings["upload_isolated"])
 
-        # 3b. Upload isolated vocal to S3 for frontend playback
-        t1 = time.time()
-        isolated_s3_key = (
-            f"vocal-recordings/{req.userId}/{req.songId}/"
-            f"{req.jobId}_isolated.wav"
-        )
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tmp.write(vocal_bytes)
-            tmp_vocal_path = tmp.name
-        try:
-            isolated_vocal_url = _upload_to_s3(
-                tmp_vocal_path,
-                isolated_s3_key,
-                content_type="audio/wav",
-            )
-        finally:
-            os.unlink(tmp_vocal_path)
-        timings["upload_isolated"] = time.time() - t1
-        logger.info("[PROFILE] upload_isolated: %.1fs", timings["upload_isolated"])
+            # Extract features
+            t3 = time.time()
+            _update_job_stage(req.jobId, "extracting")
+            feats = run_feature_extraction.remote(vb, "vocal.wav")
+            timings["extract"] = time.time() - t3
+            logger.info("[PROFILE] extract_features: %.1fs", timings["extract"])
 
-        # 4. Extract user features
-        t1 = time.time()
-        _update_job_stage(req.jobId, "extracting")
-        user_features = run_feature_extraction.remote(vocal_bytes, "vocal.wav")
-        timings["extract"] = time.time() - t1
-        logger.info("[PROFILE] extract_features: %.1fs", timings["extract"])
+            return vb, iso_url, feats
 
-        # 5. Load reference features (or auto-create)
-        t1 = time.time()
-        _update_job_stage(req.jobId, "loading_reference")
-        ref_features = None
-        reference_vocal_id = req.referenceVocalId
+        def _load_reference():
+            """Step 5: load reference features (or auto-create)."""
+            t1 = time.time()
+            ref_feats = None
+            ref_id = req.referenceVocalId
 
-        if reference_vocal_id:
-            features_url = _get_reference_features_url(reference_vocal_id)
-            if features_url:
-                ref_features = _download_json_from_s3(features_url)
+            if ref_id:
+                features_url = _get_reference_features_url(ref_id)
+                if features_url:
+                    ref_feats = _download_json_from_s3(features_url)
 
-        if ref_features is None:
-            features_url = _find_reference_for_song(req.songId, req.voicePart)
-            if features_url:
-                ref_features = _download_json_from_s3(features_url)
+            if ref_feats is None:
+                features_url = _find_reference_for_song(req.songId, req.voicePart)
+                if features_url:
+                    ref_feats = _download_json_from_s3(features_url)
 
-        if ref_features is None:
-            # Try to auto-create reference from song's audio tracks
-            logger.info(
-                "No reference found, attempting auto-creation from audio tracks"
-            )
-            ref_result = _auto_create_reference(req.songId, req.voicePart)
-            if ref_result:
-                ref_features = ref_result["features"]
-                reference_vocal_id = ref_result["referenceVocalId"]
-        timings["load_ref"] = time.time() - t1
-        logger.info("[PROFILE] load_reference: %.1fs (found=%s)", timings["load_ref"], ref_features is not None)
+            if ref_feats is None:
+                logger.info(
+                    "No reference found, attempting auto-creation from audio tracks"
+                )
+                ref_result = _auto_create_reference(req.songId, req.voicePart)
+                if ref_result:
+                    ref_feats = ref_result["features"]
+                    ref_id = ref_result["referenceVocalId"]
+
+            timings["load_ref"] = time.time() - t1
+            logger.info("[PROFILE] load_reference: %.1fs (found=%s)", timings["load_ref"], ref_feats is not None)
+            return ref_feats, ref_id
+
+        # Run both branches in parallel
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            future_isolate: Future = pool.submit(_isolate_and_extract)
+            future_ref: Future = pool.submit(_load_reference)
+
+            vocal_bytes, isolated_vocal_url, user_features = future_isolate.result()
+            ref_features, reference_vocal_id = future_ref.result()
 
         # 6 + 7. Score and generate coaching tips
         t1 = time.time()
