@@ -158,7 +158,7 @@ export default function DashboardPage() {
         </h1>
         {session?.user?.name && (
           <p className="mt-1 text-text-muted">
-            {'שלום'}, {session.user.name}
+            {`שלום, ${session.user.name}`}
           </p>
         )}
       </div>
