@@ -60,6 +60,9 @@ def generate_coaching_tips(
         logger.error("Anthropic API error: %s", exc)
         raise RuntimeError(f"Anthropic API error: {exc}") from None
 
+    # Strip markdown fences if Claude added them despite prompt
+    raw_text = _strip_markdown_fences(raw_text)
+
     # Parse the JSON array
     try:
         tips = json.loads(raw_text)
@@ -83,6 +86,21 @@ def generate_coaching_tips(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _strip_markdown_fences(text: str) -> str:
+    """Remove markdown code fences that Claude sometimes adds."""
+    import re
+    # Match ```json ... ``` or ``` ... ```
+    m = re.search(r'```(?:json)?\s*\n?(.*?)```', text, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    # Also handle case where only opening fence exists
+    if text.startswith('```'):
+        text = text.split('\n', 1)[-1] if '\n' in text else text[3:]
+    if text.endswith('```'):
+        text = text[:-3]
+    return text.strip()
+
 
 def _build_user_message(
     scores: dict,

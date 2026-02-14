@@ -220,7 +220,7 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
     ref_rms_times = np.array(ref_features["rms_times"])
 
     pitch_deviations = []  # in cents
-    timing_offsets = []    # in seconds
+    raw_timing_offsets = []  # in seconds (before normalization)
     energy_ratios = []     # user/ref ratio
 
     for u_idx, r_idx in path:
@@ -234,10 +234,10 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
             cents = 1200.0 * np.log2(u_f / r_f)
             pitch_deviations.append(round(float(cents), 2))
 
-        # -- Timing offset --
+        # -- Timing offset (raw, before normalization) --
         u_t = user_times[u_idx] if u_idx < len(user_times) else 0.0
         r_t = ref_times[r_idx] if r_idx < len(ref_times) else 0.0
-        timing_offsets.append(round(float(u_t - r_t), 4))
+        raw_timing_offsets.append(float(u_t - r_t))
 
         # -- Energy ratio --
         # Map pitch-frame index to nearest RMS frame
@@ -251,6 +251,19 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
             energy_ratios.append(round(float(u_e / r_e), 4))
         else:
             energy_ratios.append(None)
+
+    # Normalize timing offsets: subtract the median baseline offset.
+    # When comparing a chunk (starts at 0s) against a full-song reference
+    # (where the matching section starts at e.g. 28s), the raw offsets are
+    # all ~-28s. The median captures this constant shift; deviations from
+    # the median represent actual timing errors (early/late entries).
+    raw_arr = np.array(raw_timing_offsets)
+    baseline = float(np.median(raw_arr))
+    timing_offsets = [round(float(v - baseline), 4) for v in raw_timing_offsets]
+    logger.info(
+        "Timing normalization: baseline=%.3fs (subtracted from all offsets)",
+        baseline,
+    )
 
     alignment = {
         "path": [(int(u), int(r)) for u, r in path],
