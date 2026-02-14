@@ -35,6 +35,7 @@ interface Song {
   hasLyrics: boolean
   allSynced: boolean
   hasUnsynced: boolean
+  stemsCount?: number
 }
 
 export default function SongsPage() {
@@ -58,6 +59,7 @@ export default function SongsPage() {
   const [audioSourceFilter, setAudioSourceFilter] = useState<'all' | 'voices' | 'youtube' | 'spotify' | 'none'>('all')
   const [noVersesOnly, setNoVersesOnly] = useState(false)
   const [noSyncOnly, setNoSyncOnly] = useState(false)
+  const [stemsOnly, setStemsOnly] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   const [archiveModalSong, setArchiveModalSong] = useState<Song | null>(null)
   const [deleteModalSong, setDeleteModalSong] = useState<Song | null>(null)
@@ -180,7 +182,9 @@ export default function SongsPage() {
 
       const matchesSync = !noSyncOnly || song.hasUnsynced
 
-      return matchesSearch && matchesLanguage && matchesAudioSource && matchesVerses && matchesSync
+      const matchesStems = !stemsOnly || (song.stemsCount ?? 0) > 0
+
+      return matchesSearch && matchesLanguage && matchesAudioSource && matchesVerses && matchesSync && matchesStems
     })
 
     // Sort: favorites first, then by creation date (already sorted from API)
@@ -189,12 +193,12 @@ export default function SongsPage() {
       if (!a.isFavorited && b.isFavorited) return 1
       return 0
     })
-  }, [songs, deferredSearch, languageFilter, audioSourceFilter, noVersesOnly, noSyncOnly])
+  }, [songs, deferredSearch, languageFilter, audioSourceFilter, noVersesOnly, noSyncOnly, stemsOnly])
 
   // Reset visible count when filters change
   useEffect(() => {
     setVisibleCount(BATCH)
-  }, [deferredSearch, languageFilter, audioSourceFilter, noVersesOnly, noSyncOnly])
+  }, [deferredSearch, languageFilter, audioSourceFilter, noVersesOnly, noSyncOnly, stemsOnly])
 
   const visibleSongs = filteredSongs.slice(0, visibleCount)
 
@@ -755,6 +759,18 @@ export default function SongsPage() {
             >
               ללא סנכרון
             </button>
+            <button
+              type="button"
+              onClick={() => setStemsOnly(!stemsOnly)}
+              className={[
+                'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                stemsOnly
+                  ? 'bg-primary text-white'
+                  : 'bg-surface-hover text-foreground hover:bg-border',
+              ].join(' ')}
+            >
+              שירה מבודדת
+            </button>
           </div>
         </div>
       )}
@@ -896,6 +912,14 @@ export default function SongsPage() {
                     <span className="inline-flex items-center gap-0.5 text-secondary">
                       <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
                       מסונכרן
+                    </span>
+                  )}
+                  {(song.stemsCount ?? 0) > 0 && (
+                    <span className="inline-flex items-center gap-0.5 text-primary">
+                      <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                      </svg>
+                      {song.stemsCount} סטמים
                     </span>
                   )}
                 </div>
