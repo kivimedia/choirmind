@@ -255,6 +255,7 @@ export default function ChunkRecordingPanel({
 }: ChunkRecordingPanelProps) {
   const [step, setStep] = useState<Step>('ready')
   const [withBacking, setWithBacking] = useState(true)
+  const [useHeadphones, setUseHeadphones] = useState(false)
   const [recordingAudioMode, setRecordingAudioMode] = useState<RecordingAudioMode>('full_mix')
 
   // Compute effective backing URL based on audio mode
@@ -392,7 +393,7 @@ export default function ChunkRecordingPanel({
             voicePart,
             recordingS3Key: key,
             recordingDurationMs: recorder.durationMs,
-            useHeadphones: !withBacking,
+            useHeadphones,
           }),
           signal: controller.signal,
         })
@@ -493,12 +494,23 @@ export default function ChunkRecordingPanel({
         {/* ==================== Ready ==================== */}
         {step === 'ready' && (
           <div className="space-y-4">
-            {/* Tip: backing track works best with headphones */}
-            {hasAudio && (
-              <p className="text-xs text-text-muted">
-                {'💡 מומלץ להשתמש באוזניות כדי שהמוזיקה לא תיקלט בהקלטה'}
-              </p>
-            )}
+            {/* Headphones toggle */}
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useHeadphones}
+                onChange={(e) => setUseHeadphones(e.target.checked)}
+                className="h-5 w-5 rounded border-border text-primary focus:ring-primary"
+              />
+              <div>
+                <span className="text-sm font-medium text-foreground">
+                  {'🎧 אני עם אוזניות'}
+                </span>
+                <p className="text-xs text-text-muted">
+                  {'מדלג על הפרדת קול (ניתוח מהיר יותר)'}
+                </p>
+              </div>
+            </label>
 
             {/* Backing track toggle */}
             {hasAudio && (

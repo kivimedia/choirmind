@@ -240,6 +240,7 @@ export default function FullSongRecordingPanel({
 }: FullSongRecordingPanelProps) {
   const [step, setStep] = useState<Step>('ready')
   const [audioMode, setAudioMode] = useState<AudioMode>('full_mix')
+  const [useHeadphones, setUseHeadphones] = useState(false)
 
   // Resolve backing track URL based on audio mode
   const backingTrackUrl = useMemo(() => {
@@ -439,7 +440,7 @@ export default function FullSongRecordingPanel({
             voicePart,
             recordingS3Key: key,
             recordingDurationMs: recorder.durationMs,
-            useHeadphones: false,
+            useHeadphones,
           }),
           signal: controller.signal,
         })
@@ -541,9 +542,23 @@ export default function FullSongRecordingPanel({
               </div>
             )}
 
-            <p className="text-xs text-text-muted">
-              💡 מומלץ להשתמש באוזניות כדי שהמוזיקה לא תיקלט בהקלטה
-            </p>
+            {/* Headphones toggle */}
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useHeadphones}
+                onChange={(e) => setUseHeadphones(e.target.checked)}
+                className="h-5 w-5 rounded border-border text-primary focus:ring-primary"
+              />
+              <div>
+                <span className="text-sm font-medium text-foreground">
+                  {'🎧 אני עם אוזניות'}
+                </span>
+                <p className="text-xs text-text-muted">
+                  {'מדלג על הפרדת קול (ניתוח מהיר יותר)'}
+                </p>
+              </div>
+            </label>
 
             {errorMsg && (
               <p className="text-sm text-danger text-center">{errorMsg}</p>
