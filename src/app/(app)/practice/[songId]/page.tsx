@@ -64,6 +64,13 @@ const FADE_LEVEL_LABELS: Record<number, string> = {
   5: 'רמה 5',
 }
 
+const VOICE_PART_LABELS: Record<string, string> = {
+  soprano: 'סופרן',
+  alto: 'אלט',
+  tenor: 'טנור',
+  bass: 'בס',
+}
+
 // Default audio mode based on fade level
 function getDefaultAudioMode(fadeLevel: number): AudioMode {
   if (fadeLevel >= 4) return 'music_only'
@@ -295,6 +302,14 @@ export default function PracticeSessionPage() {
       vocalsOnly: refs.some((r) => !!r.isolatedFileUrl),
       musicOnly: refs.some((r) => !!r.accompanimentFileUrl),
     }
+  }, [song])
+
+  // Available voice parts from reference vocals
+  const availableVoiceParts = useMemo(() => {
+    const refs = song?.referenceVocals ?? []
+    const parts = [...new Set(refs.map((r) => r.voicePart))]
+      .filter((p) => p in VOICE_PART_LABELS)
+    return parts
   }, [song])
 
   // Handle end-of-song rating
@@ -557,6 +572,30 @@ export default function PracticeSessionPage() {
               onChange={setAudioMode}
               className="shrink-0"
             />
+          )}
+
+          {/* Voice part selector */}
+          {availableVoiceParts.length > 1 && (audioMode === 'vocals_only' || audioMode === 'music_only') && (
+            <div className="flex items-center gap-0.5 rounded-full border border-border bg-surface px-1 py-0.5 shrink-0">
+              {availableVoiceParts.map((part) => {
+                const isActive = userVoicePart === part
+                return (
+                  <button
+                    key={part}
+                    type="button"
+                    onClick={() => setUserVoicePart(part)}
+                    className={[
+                      'rounded-full px-2.5 py-1.5 transition-colors text-xs font-medium whitespace-nowrap',
+                      isActive
+                        ? 'bg-primary text-white'
+                        : 'text-text-muted hover:bg-surface-hover',
+                    ].join(' ')}
+                  >
+                    {VOICE_PART_LABELS[part] ?? part}
+                  </button>
+                )
+              })}
+            </div>
           )}
         </div>
       </div>
