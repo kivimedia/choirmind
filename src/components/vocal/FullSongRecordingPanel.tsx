@@ -155,43 +155,37 @@ function parsePracticeSession(ps: Record<string, unknown>): SessionResult {
 // Analyzing progress
 // ---------------------------------------------------------------------------
 
-const ANALYSIS_STEPS = [
-  { label: 'ההקלטה הועלתה בהצלחה', delayMs: 0 },
-  { label: 'מוריד את ההקלטה לשרת העיבוד', delayMs: 3000 },
-  { label: 'מפריד קול מרעשי רקע (Demucs AI)', delayMs: 8000 },
-  { label: 'מחלץ מאפייני קול — גובה, תזמון, עוצמה', delayMs: 40000 },
-  { label: 'טוען קול ייחוס להשוואה', delayMs: 55000 },
-  { label: 'מחשב ציון ע"י השוואת ביצוע', delayMs: 70000 },
-  { label: 'יוצר טיפים אישיים עם AI', delayMs: 90000 },
-  { label: 'שומר תוצאות...', delayMs: 110000 },
+const ANALYSIS_STAGES: { key: string; label: string }[] = [
+  { key: 'uploading', label: 'מעלה הקלטה' },
+  { key: 'downloading', label: 'מוריד הקלטה לשרת' },
+  { key: 'isolating', label: 'מפריד קול (Demucs AI)' },
+  { key: 'extracting', label: 'מחלץ מאפייני קול' },
+  { key: 'loading_reference', label: 'טוען קול ייחוס' },
+  { key: 'scoring', label: 'מחשב ציון ויוצר טיפים' },
+  { key: 'saving', label: 'שומר תוצאות' },
 ]
 
-function AnalyzingProgress({ onCancel }: { onCancel: () => void }) {
-  const [activeStep, setActiveStep] = useState(0)
+function AnalyzingProgress({ stage, onCancel }: { stage: string | null; onCancel: () => void }) {
   const [elapsed, setElapsed] = useState(0)
   const startRef = useRef(Date.now())
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const ms = Date.now() - startRef.current
-      setElapsed(ms)
-      for (let i = ANALYSIS_STEPS.length - 1; i >= 0; i--) {
-        if (ms >= ANALYSIS_STEPS[i].delayMs) {
-          setActiveStep(i)
-          break
-        }
-      }
+      setElapsed(Date.now() - startRef.current)
     }, 500)
     return () => clearInterval(interval)
   }, [])
 
+  const activeStep = ANALYSIS_STAGES.findIndex((s) => s.key === stage)
+  const effectiveStep = activeStep >= 0 ? activeStep : 0
+
   return (
     <div className="space-y-4 py-2">
       <div className="space-y-2">
-        {ANALYSIS_STEPS.map((s, i) => {
-          const isDone = i < activeStep
-          const isActive = i === activeStep
-          const isPending = i > activeStep
+        {ANALYSIS_STAGES.map((s, i) => {
+          const isDone = i < effectiveStep
+          const isActive = i === effectiveStep
+          const isPending = i > effectiveStep
           return (
             <div
               key={i}
@@ -359,6 +353,7 @@ export default function FullSongRecordingPanel({
 
   // Job state
   const [jobId, setJobId] = useState<string | null>(null)
+  const [serverStage, setServerStage] = useState<string | null>(null)
   const [result, setResult] = useState<SessionResult | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -376,6 +371,7 @@ export default function FullSongRecordingPanel({
     if (!isOpen) {
       setStep('ready')
       setJobId(null)
+      setServerStage(null)
       setResult(null)
       setErrorMsg(null)
       setRecordingBlobUrl(null)
@@ -461,6 +457,7 @@ export default function FullSongRecordingPanel({
         }
 
         setJobId(job.id)
+        setServerStage('uploading')
         setStep('analyzing')
       } catch (err) {
         if (controller.signal.aborted) return
@@ -496,6 +493,9 @@ export default function FullSongRecordingPanel({
         const data = await res.json()
         const job = data.job ?? data
 
+        // Update progress stage from server
+        if (job.stage) setServerStage(job.stage)
+
         if (job.status === 'COMPLETED' && job.practiceSession) {
           setResult(parsePracticeSession(job.practiceSession))
           setStep('results')
@@ -520,7 +520,7 @@ export default function FullSongRecordingPanel({
   // ---------------------------------------------------------------------------
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`הקלטת שיר מלא — ${songTitle}`} resizable className="max-w-2xl">
+    <Modal isOpen={isOpen} onClose={onClose} title={`הקלטת שיר מלא: ${songTitle}`} resizable className="max-w-2xl">
       <div className="space-y-4">
         {/* ==================== Ready ==================== */}
         {step === 'ready' && (
@@ -583,7 +583,7 @@ export default function FullSongRecordingPanel({
             {/* Backing track status */}
             {backingTrackUrl && (
               <p className={`text-xs text-center ${recorder.backingPlaying ? 'text-secondary' : 'text-text-muted'}`}>
-                {recorder.backingPlaying ? '♫ מוזיקה מנגנת ברקע' : 'מוזיקת רקע — לא הצליחה להתנגן'}
+                {recorder.backingPlaying ? '♫ מוזיקה מנגנת ברקע' : 'מוזיקת רקע לא הצליחה להתנגן'}
               </p>
             )}
 
@@ -669,6 +669,7 @@ export default function FullSongRecordingPanel({
         {/* ==================== Analyzing ==================== */}
         {step === 'analyzing' && (
           <AnalyzingProgress
+            stage={serverStage}
             onCancel={() => {
               if (pollRef.current) clearInterval(pollRef.current)
               setStep('ready')
@@ -683,7 +684,7 @@ export default function FullSongRecordingPanel({
             {result.isMock && (
               <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-center">
                 <p className="text-xs text-yellow-600 dark:text-yellow-400">
-                  ניתוח דמו — שירות הניתוח הקולי לא זמין כרגע. הציונים אינם מבוססים על ההקלטה.
+                  ניתוח דמו: שירות הניתוח הקולי לא זמין כרגע. הציונים אינם מבוססים על ההקלטה.
                 </p>
               </div>
             )}

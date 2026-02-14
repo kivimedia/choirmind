@@ -41,7 +41,7 @@ image = (
         "fastapi",
         "uvicorn",
         "boto3",
-        "anthropic",
+        "anthropic>=0.45.0",
         "numpy",
         "librosa",
         "praat-parselmouth",
@@ -150,6 +150,20 @@ def _update_job_status(
                     """,
                     (status, now, error_message, job_id),
                 )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _update_job_stage(job_id: str, stage: str):
+    """Update the stage field for progress tracking."""
+    conn = _get_db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                'UPDATE "VocalAnalysisJob" SET stage = %s WHERE id = %s',
+                (stage, job_id),
+            )
         conn.commit()
     finally:
         conn.close()
@@ -755,6 +769,7 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
     try:
         # 1. Mark job as PROCESSING
         _update_job_status(req.jobId, "PROCESSING")
+        _update_job_stage(req.jobId, "downloading")
 
         # 2. Download recording from S3
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -766,6 +781,7 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
         os.unlink(recording_path)
 
         # 3. Vocal isolation if needed
+        _update_job_stage(req.jobId, "isolating")
         if not req.useHeadphones:
             logger.info("Running Demucs vocal isolation (no headphones)")
             demucs_result = run_demucs_isolation.remote(
@@ -795,9 +811,11 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
         logger.info("Uploaded isolated vocal: %s", isolated_s3_key)
 
         # 4. Extract user features
+        _update_job_stage(req.jobId, "extracting")
         user_features = run_feature_extraction.remote(vocal_bytes, "vocal.wav")
 
         # 5. Load reference features (or auto-create)
+        _update_job_stage(req.jobId, "loading_reference")
         ref_features = None
         reference_vocal_id = req.referenceVocalId
 
@@ -822,6 +840,7 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
                 reference_vocal_id = ref_result["referenceVocalId"]
 
         # 6 + 7. Score and generate coaching tips
+        _update_job_stage(req.jobId, "scoring")
         song_title = _get_song_title(req.songId)
 
         if ref_features is not None:
@@ -840,6 +859,7 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
         coaching_tips = result["coachingTips"]
 
         # 8. Compute XP and create VocalPracticeSession
+        _update_job_stage(req.jobId, "saving")
         xp_earned = _compute_xp(scores["overallScore"])
 
         session_id = _create_vocal_practice_session(

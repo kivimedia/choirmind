@@ -302,6 +302,7 @@ model VocalAnalysisJob {
   recordingDurationMs Int
   useHeadphones       Boolean   @default(false)
   status              String    @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  stage               String?   // Current processing stage for progress display
   errorMessage        String?
   attempts            Int       @default(0)
   practiceSessionId   String?   @unique

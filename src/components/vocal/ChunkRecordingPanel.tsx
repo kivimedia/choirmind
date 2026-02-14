@@ -147,45 +147,39 @@ function parsePracticeSession(ps: Record<string, unknown>): SessionResult {
 // Analyzing progress indicator
 // ---------------------------------------------------------------------------
 
-const ANALYSIS_STEPS = [
-  { label: 'ההקלטה הועלתה בהצלחה', delayMs: 0 },
-  { label: 'מוריד את ההקלטה לשרת העיבוד', delayMs: 3000 },
-  { label: 'מפריד קול מרעשי רקע (Demucs AI)', delayMs: 8000 },
-  { label: 'מחלץ מאפייני קול — גובה, תזמון, עוצמה', delayMs: 40000 },
-  { label: 'טוען קול ייחוס להשוואה', delayMs: 55000 },
-  { label: 'מחשב ציון ע"י השוואת ביצוע', delayMs: 70000 },
-  { label: 'יוצר טיפים אישיים עם AI', delayMs: 90000 },
-  { label: 'שומר תוצאות...', delayMs: 110000 },
+const ANALYSIS_STAGES: { key: string; label: string }[] = [
+  { key: 'uploading', label: 'מעלה הקלטה' },
+  { key: 'downloading', label: 'מוריד הקלטה לשרת' },
+  { key: 'isolating', label: 'מפריד קול (Demucs AI)' },
+  { key: 'extracting', label: 'מחלץ מאפייני קול' },
+  { key: 'loading_reference', label: 'טוען קול ייחוס' },
+  { key: 'scoring', label: 'מחשב ציון ויוצר טיפים' },
+  { key: 'saving', label: 'שומר תוצאות' },
 ]
 
-function AnalyzingProgress({ onCancel }: { onCancel: () => void }) {
-  const [activeStep, setActiveStep] = useState(0)
+function AnalyzingProgress({ stage, onCancel }: { stage: string | null; onCancel: () => void }) {
   const [elapsed, setElapsed] = useState(0)
   const startRef = useRef(Date.now())
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const ms = Date.now() - startRef.current
-      setElapsed(ms)
-      // Advance to the latest step whose delay has passed
-      for (let i = ANALYSIS_STEPS.length - 1; i >= 0; i--) {
-        if (ms >= ANALYSIS_STEPS[i].delayMs) {
-          setActiveStep(i)
-          break
-        }
-      }
+      setElapsed(Date.now() - startRef.current)
     }, 500)
     return () => clearInterval(interval)
   }, [])
+
+  // Find active step index from server stage
+  const activeStep = ANALYSIS_STAGES.findIndex((s) => s.key === stage)
+  const effectiveStep = activeStep >= 0 ? activeStep : 0
 
   return (
     <div className="space-y-4 py-2">
       {/* Steps list */}
       <div className="space-y-2">
-        {ANALYSIS_STEPS.map((s, i) => {
-          const isDone = i < activeStep
-          const isActive = i === activeStep
-          const isPending = i > activeStep
+        {ANALYSIS_STAGES.map((s, i) => {
+          const isDone = i < effectiveStep
+          const isActive = i === effectiveStep
+          const isPending = i > effectiveStep
           return (
             <div
               key={i}
@@ -293,6 +287,7 @@ export default function ChunkRecordingPanel({
 
   // withBacking defaults to true — user can toggle manually
   const [jobId, setJobId] = useState<string | null>(null)
+  const [serverStage, setServerStage] = useState<string | null>(null)
   const [result, setResult] = useState<SessionResult | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -303,6 +298,7 @@ export default function ChunkRecordingPanel({
     if (!isOpen) {
       setStep('ready')
       setJobId(null)
+      setServerStage(null)
       setResult(null)
       setErrorMsg(null)
       setRecordingBlobUrl(null)
@@ -392,6 +388,7 @@ export default function ChunkRecordingPanel({
         }
 
         setJobId(job.id)
+        setServerStage('uploading')
         setStep('analyzing')
       } catch (err) {
         if (controller.signal.aborted) return
@@ -426,6 +423,9 @@ export default function ChunkRecordingPanel({
         if (!res.ok) return
         const data = await res.json()
         const job = data.job ?? data
+
+        // Update progress stage from server
+        if (job.stage) setServerStage(job.stage)
 
         if (job.status === 'COMPLETED' && job.practiceSession) {
           const ps = job.practiceSession
@@ -527,8 +527,8 @@ export default function ChunkRecordingPanel({
                 {recorder.backingPlaying
                   ? '♫ מוזיקה מנגנת ברקע'
                   : backingBuffer
-                    ? 'מוזיקת רקע — לא הצליחה להתנגן'
-                    : 'מוזיקת רקע — לא נטענה'}
+                    ? 'מוזיקת רקע לא הצליחה להתנגן'
+                    : 'מוזיקת רקע לא נטענה'}
               </p>
             )}
 
@@ -572,6 +572,7 @@ export default function ChunkRecordingPanel({
         {/* ==================== Analyzing ==================== */}
         {step === 'analyzing' && (
           <AnalyzingProgress
+            stage={serverStage}
             onCancel={() => {
               if (pollRef.current) clearInterval(pollRef.current)
               setStep('ready')
@@ -586,7 +587,7 @@ export default function ChunkRecordingPanel({
             {result.isMock && (
               <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-center">
                 <p className="text-xs text-yellow-600 dark:text-yellow-400">
-                  {'ניתוח דמו — שירות הניתוח הקולי לא זמין כרגע. הציונים אינם מבוססים על ההקלטה.'}
+                  {'ניתוח דמו: שירות הניתוח הקולי לא זמין כרגע. הציונים אינם מבוססים על ההקלטה.'}
                 </p>
               </div>
             )}
