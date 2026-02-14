@@ -31,7 +31,7 @@ def isolate_vocals(
     audio_path: str,
     output_dir: str,
     model: str = "htdemucs_ft",
-) -> str:
+) -> tuple[str, str]:
     """Run Demucs to separate vocals from a mix.
 
     Args:
@@ -40,7 +40,8 @@ def isolate_vocals(
         model:      Demucs model name (default: htdemucs_ft for best quality).
 
     Returns:
-        Path to the isolated vocal WAV file.
+        Tuple of (vocal_path, accompaniment_path) — paths to the isolated
+        vocal and no_vocals (accompaniment) WAV files.
     """
     logger.info("Running Demucs vocal isolation: model=%s, input=%s", model, audio_path)
 
@@ -62,9 +63,10 @@ def isolate_vocals(
         pass
 
     # The output tree is: <output_dir>/<model>/<track_name>/vocals.wav
-    # but may vary by Demucs version — search for the vocals file
+    # and <output_dir>/<model>/<track_name>/no_vocals.wav
     track_name = Path(audio_path).stem
     vocal_path = os.path.join(output_dir, model, track_name, "vocals.wav")
+    accompaniment_path = os.path.join(output_dir, model, track_name, "no_vocals.wav")
 
     if not os.path.isfile(vocal_path):
         # Search for any vocals file in the output directory
@@ -72,7 +74,7 @@ def isolate_vocals(
         found = None
         for root, dirs, files in os.walk(output_dir):
             for f in files:
-                if "vocal" in f.lower():
+                if f.lower() == "vocals.wav":
                     found = os.path.join(root, f)
                     break
             if found:
@@ -90,8 +92,26 @@ def isolate_vocals(
                 f"Demucs did not produce vocal file. Output dir contents: {all_files}"
             )
 
-    logger.info("Vocal isolation complete: %s", vocal_path)
-    return vocal_path
+    if not os.path.isfile(accompaniment_path):
+        # Search for no_vocals file
+        logger.warning("Expected accompaniment not at %s, searching...", accompaniment_path)
+        found = None
+        for root, dirs, files in os.walk(output_dir):
+            for f in files:
+                if "no_vocal" in f.lower():
+                    found = os.path.join(root, f)
+                    break
+            if found:
+                break
+        if found:
+            accompaniment_path = found
+            logger.info("Found accompaniment at: %s", accompaniment_path)
+        else:
+            logger.warning("No accompaniment file found — will return empty path")
+            accompaniment_path = ""
+
+    logger.info("Vocal isolation complete: vocals=%s, accompaniment=%s", vocal_path, accompaniment_path)
+    return vocal_path, accompaniment_path
 
 
 # ---------------------------------------------------------------------------

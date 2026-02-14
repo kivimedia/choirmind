@@ -162,6 +162,7 @@ def _update_reference_status(
     features_url: Optional[str] = None,
     duration_ms: Optional[int] = None,
     error_message: Optional[str] = None,
+    accompaniment_url: Optional[str] = None,
 ):
     """Update ReferenceVocal status in PostgreSQL."""
     conn = _get_db_conn()
@@ -176,10 +177,11 @@ def _update_reference_status(
                         "isolatedFileUrl" = %s,
                         "featuresFileUrl" = %s,
                         "durationMs" = %s,
+                        "accompanimentFileUrl" = %s,
                         "updatedAt" = %s
                     WHERE id = %s
                     """,
-                    (status, isolated_url, features_url, duration_ms, now, ref_id),
+                    (status, isolated_url, features_url, duration_ms, accompaniment_url, now, ref_id),
                 )
             elif status == "PROCESSING":
                 cur.execute(
@@ -344,15 +346,22 @@ def _get_reference_features_url(ref_id: str) -> Optional[str]:
 
 
 def _find_reference_for_song(song_id: str, voice_part: str) -> Optional[str]:
-    """Find a READY ReferenceVocal for the given song + voice part."""
+    """Find a ReferenceVocal with features for the given song + voice part.
+
+    Prefers READY references, but also returns features from PENDING/PROCESSING
+    if available (e.g. from a prior run that populated featuresFileUrl).
+    """
     conn = _get_db_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT "featuresFileUrl" FROM "ReferenceVocal"
-                WHERE "songId" = %s AND "voicePart" = %s AND status = 'READY'
-                ORDER BY "createdAt" DESC
+                WHERE "songId" = %s AND "voicePart" = %s
+                  AND "featuresFileUrl" IS NOT NULL
+                ORDER BY
+                    CASE status WHEN 'READY' THEN 0 ELSE 1 END,
+                    "createdAt" DESC
                 LIMIT 1
                 """,
                 (song_id, voice_part),
@@ -429,7 +438,8 @@ def _auto_create_reference(song_id: str, voice_part: str) -> Optional[dict]:
     os.unlink(src_path)
 
     # Run Demucs to isolate vocals
-    vocal_bytes = run_demucs_isolation.remote(audio_bytes, "auto_reference.wav")
+    demucs_result = run_demucs_isolation.remote(audio_bytes, "auto_reference.wav")
+    vocal_bytes = demucs_result["vocals"]
 
     # Extract features
     features = run_feature_extraction.remote(vocal_bytes, "auto_reference_vocal.wav")
@@ -457,7 +467,7 @@ def _auto_create_reference(song_id: str, voice_part: str) -> Optional[dict]:
 
     duration_ms = int(features["duration_s"] * 1000)
 
-    # Create ReferenceVocal record
+    # Create or update ReferenceVocal record (handle duplicate from backfill)
     conn = _get_db_conn()
     try:
         with conn.cursor() as cur:
@@ -469,6 +479,14 @@ def _auto_create_reference(song_id: str, voice_part: str) -> Optional[dict]:
                     "isolatedFileUrl", "featuresFileUrl", "durationMs",
                     "demucsModel", status, "createdAt", "updatedAt"
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT ("songId", "voicePart", "sourceTrackId")
+                DO UPDATE SET
+                    "isolatedFileUrl" = EXCLUDED."isolatedFileUrl",
+                    "featuresFileUrl" = EXCLUDED."featuresFileUrl",
+                    "durationMs" = EXCLUDED."durationMs",
+                    status = 'READY',
+                    "updatedAt" = EXCLUDED."updatedAt"
+                RETURNING id
                 ''',
                 (
                     ref_id, song_id, voice_part, track_id,
@@ -476,15 +494,17 @@ def _auto_create_reference(song_id: str, voice_part: str) -> Optional[dict]:
                     "htdemucs_ft", "READY", now, now,
                 ),
             )
+            row = cur.fetchone()
+            actual_id = row[0] if row else ref_id
         conn.commit()
     finally:
         conn.close()
 
     logger.info(
-        "Auto-created reference %s for song %s part %s",
-        ref_id, song_id, voice_part,
+        "Auto-created/updated reference %s for song %s part %s",
+        actual_id, song_id, voice_part,
     )
-    return {"features": features, "referenceVocalId": ref_id}
+    return {"features": features, "referenceVocalId": actual_id}
 
 
 # ---------------------------------------------------------------------------
@@ -589,8 +609,11 @@ def _compute_xp(overall_score: float) -> int:
 
 
 @app.function(gpu="A10G", timeout=600)
-def run_demucs_isolation(audio_bytes: bytes, filename: str) -> bytes:
-    """Run Demucs on GPU to isolate vocals. Returns WAV bytes of the vocal track."""
+def run_demucs_isolation(audio_bytes: bytes, filename: str) -> dict:
+    """Run Demucs on GPU to isolate vocals.
+
+    Returns dict with 'vocals' (bytes) and 'accompaniment' (bytes or None).
+    """
     from processing import isolate_vocals
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -601,10 +624,17 @@ def run_demucs_isolation(audio_bytes: bytes, filename: str) -> bytes:
         output_dir = os.path.join(tmpdir, "output")
         os.makedirs(output_dir, exist_ok=True)
 
-        vocal_path = isolate_vocals(input_path, output_dir)
+        vocal_path, accompaniment_path = isolate_vocals(input_path, output_dir)
 
         with open(vocal_path, "rb") as f:
-            return f.read()
+            vocal_bytes = f.read()
+
+        accompaniment_bytes = None
+        if accompaniment_path and os.path.isfile(accompaniment_path):
+            with open(accompaniment_path, "rb") as f:
+                accompaniment_bytes = f.read()
+
+        return {"vocals": vocal_bytes, "accompaniment": accompaniment_bytes}
 
 
 # ---------------------------------------------------------------------------
@@ -634,7 +664,7 @@ def run_feature_extraction(audio_bytes: bytes, filename: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@app.function(timeout=120)
+@app.function(timeout=300)
 def run_scoring_and_coaching(
     user_features: dict,
     ref_features: dict,
@@ -661,7 +691,7 @@ def run_scoring_and_coaching(
     }
 
 
-@app.function(timeout=120)
+@app.function(timeout=300)
 def run_standalone_scoring_and_coaching(
     user_features: dict,
     voice_part: str,
@@ -738,9 +768,10 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
         # 3. Vocal isolation if needed
         if not req.useHeadphones:
             logger.info("Running Demucs vocal isolation (no headphones)")
-            vocal_bytes = run_demucs_isolation.remote(
+            demucs_result = run_demucs_isolation.remote(
                 recording_bytes, "recording.wav"
             )
+            vocal_bytes = demucs_result["vocals"]
         else:
             logger.info("Headphones used -- skipping vocal isolation")
             vocal_bytes = recording_bytes
@@ -897,7 +928,9 @@ async def prepare_reference(req: PrepareReferenceRequest):
         os.unlink(src_path)
 
         # 3. Demucs vocal isolation (always for references)
-        vocal_bytes = run_demucs_isolation.remote(audio_bytes, "reference.wav")
+        demucs_result = run_demucs_isolation.remote(audio_bytes, "reference.wav")
+        vocal_bytes = demucs_result["vocals"]
+        accompaniment_bytes = demucs_result.get("accompaniment")
 
         # 4. Extract features from isolated vocals
         features = run_feature_extraction.remote(vocal_bytes, "reference_vocal.wav")
@@ -919,6 +952,22 @@ async def prepare_reference(req: PrepareReferenceRequest):
         finally:
             os.unlink(tmp_vocal_path)
 
+        # Upload accompaniment WAV (music-only / karaoke track)
+        accompaniment_url = None
+        if accompaniment_bytes:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp.write(accompaniment_bytes)
+                tmp_acc_path = tmp.name
+            try:
+                accompaniment_url = _upload_to_s3(
+                    tmp_acc_path,
+                    f"{s3_prefix}/{req.referenceVocalId}_accompaniment.wav",
+                    content_type="audio/wav",
+                )
+            finally:
+                os.unlink(tmp_acc_path)
+            logger.info("Uploaded accompaniment: %s", accompaniment_url)
+
         # Upload features JSON
         features_url = _upload_json_to_s3(
             features,
@@ -935,6 +984,7 @@ async def prepare_reference(req: PrepareReferenceRequest):
             isolated_url=isolated_url,
             features_url=features_url,
             duration_ms=duration_ms,
+            accompaniment_url=accompaniment_url,
         )
 
         logger.info(
@@ -948,6 +998,7 @@ async def prepare_reference(req: PrepareReferenceRequest):
             "referenceVocalId": req.referenceVocalId,
             "isolatedFileUrl": isolated_url,
             "featuresFileUrl": features_url,
+            "accompanimentFileUrl": accompaniment_url,
             "durationMs": duration_ms,
         }
 

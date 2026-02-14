@@ -30,6 +30,7 @@ export async function GET(
             id: true,
             voicePart: true,
             isolatedFileUrl: true,
+            accompanimentFileUrl: true,
             durationMs: true,
           },
         },

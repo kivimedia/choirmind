@@ -4,7 +4,82 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { checkAndUnlockAchievements } from '@/lib/achievement-checker'
 
-// POST /api/practice/review — submit a single chunk review
+// Spaced repetition logic for a single chunk
+function computeChunkUpdate(
+  selfRating: string,
+  existingProgress: { easeFactor: number; intervalDays: number; reviewCount: number; fadeLevel: number } | null,
+  inputFadeLevel: number | undefined,
+) {
+  const ratingMap: Record<string, number> = {
+    nailed_it: 4,
+    almost: 3,
+    struggling: 1,
+  }
+  const rating = ratingMap[selfRating]
+
+  const prevEaseFactor = existingProgress?.easeFactor ?? 2.5
+  const prevIntervalDays = existingProgress?.intervalDays ?? 1.0
+  const prevReviewCount = existingProgress?.reviewCount ?? 0
+  const prevFadeLevel = inputFadeLevel ?? existingProgress?.fadeLevel ?? 0
+
+  let newIntervalDays: number
+  let newReviewCount: number
+  let newEaseFactor: number
+
+  if (rating >= 3) {
+    if (prevReviewCount === 0) {
+      newIntervalDays = 1
+    } else if (prevReviewCount === 1) {
+      newIntervalDays = 3
+    } else {
+      newIntervalDays = prevIntervalDays * prevEaseFactor
+    }
+    newEaseFactor = Math.max(
+      1.3,
+      prevEaseFactor + (0.1 - (5 - rating) * (0.08 + (5 - rating) * 0.02))
+    )
+    newReviewCount = prevReviewCount + 1
+  } else {
+    newIntervalDays = 1
+    newReviewCount = 0
+    newEaseFactor = prevEaseFactor
+  }
+
+  const now = new Date()
+  const nextReviewAt = new Date(now.getTime() + newIntervalDays * 24 * 60 * 60 * 1000)
+  const memoryStrength = 1.0
+
+  let status: string
+  if (memoryStrength < 0.2) status = 'fragile'
+  else if (memoryStrength < 0.4) status = 'shaky'
+  else if (memoryStrength < 0.6) status = 'developing'
+  else if (memoryStrength < 0.8) status = 'solid'
+  else status = 'locked_in'
+
+  let newFadeLevel: number
+  if (selfRating === 'nailed_it') {
+    newFadeLevel = Math.min(prevFadeLevel + 1, 5)
+  } else if (selfRating === 'almost') {
+    newFadeLevel = prevFadeLevel
+  } else {
+    newFadeLevel = Math.max(prevFadeLevel - 1, 0)
+  }
+
+  return {
+    fadeLevel: newFadeLevel,
+    memoryStrength,
+    easeFactor: newEaseFactor,
+    intervalDays: newIntervalDays,
+    nextReviewAt,
+    reviewCount: newReviewCount,
+    lastReviewedAt: now,
+    status,
+  }
+}
+
+// POST /api/practice/review — submit chunk review(s)
+// Accepts either { chunkId, selfRating } for single chunk
+// or { chunkIds, selfRating, fadeLevel } for bulk (continuous practice)
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -14,11 +89,14 @@ export async function POST(request: NextRequest) {
 
     const userId = session.user.id
     const body = await request.json()
-    const { chunkId, selfRating, fadeLevel: inputFadeLevel } = body
+    const { selfRating, fadeLevel: inputFadeLevel } = body
 
-    if (!chunkId || !selfRating) {
+    // Support both single and bulk
+    const chunkIds: string[] = body.chunkIds ?? (body.chunkId ? [body.chunkId] : [])
+
+    if (chunkIds.length === 0 || !selfRating) {
       return NextResponse.json(
-        { error: 'chunkId and selfRating are required' },
+        { error: 'chunkId (or chunkIds) and selfRating are required' },
         { status: 400 }
       )
     }
@@ -31,175 +109,79 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verify chunk exists
-    const chunk = await prisma.chunk.findUnique({
-      where: { id: chunkId },
+    // Verify chunks exist
+    const chunks = await prisma.chunk.findMany({
+      where: { id: { in: chunkIds } },
+      include: { song: { select: { id: true, title: true } } },
     })
 
-    if (!chunk) {
-      return NextResponse.json({ error: 'Chunk not found' }, { status: 404 })
+    if (chunks.length === 0) {
+      return NextResponse.json({ error: 'No chunks found' }, { status: 404 })
     }
 
-    // Get existing progress (if any)
-    const existingProgress = await prisma.userChunkProgress.findUnique({
+    // Get existing progress for all chunks
+    const existingProgressList = await prisma.userChunkProgress.findMany({
       where: {
-        userId_chunkId: { userId, chunkId },
+        userId,
+        chunkId: { in: chunkIds },
       },
     })
+    const progressMap = new Map(existingProgressList.map((p) => [p.chunkId, p]))
 
-    // --- INLINE SPACED REPETITION LOGIC ---
-
-    // Map selfRating to SM-2 numeric rating
-    const ratingMap: Record<string, number> = {
-      nailed_it: 4,
-      almost: 3,
-      struggling: 1,
-    }
-    const rating = ratingMap[selfRating]
-
-    // Previous values (or defaults for new progress)
-    const prevEaseFactor = existingProgress?.easeFactor ?? 2.5
-    const prevIntervalDays = existingProgress?.intervalDays ?? 1.0
-    const prevReviewCount = existingProgress?.reviewCount ?? 0
-    const prevFadeLevel = inputFadeLevel ?? existingProgress?.fadeLevel ?? 0
-
-    let newIntervalDays: number
-    let newReviewCount: number
-    let newEaseFactor: number
-
-    if (rating >= 3) {
-      // Successful recall
-      if (prevReviewCount === 0) {
-        newIntervalDays = 1
-      } else if (prevReviewCount === 1) {
-        newIntervalDays = 3
-      } else {
-        newIntervalDays = prevIntervalDays * prevEaseFactor
-      }
-
-      // Update ease factor using SM-2 formula
-      newEaseFactor = Math.max(
-        1.3,
-        prevEaseFactor + (0.1 - (5 - rating) * (0.08 + (5 - rating) * 0.02))
-      )
-
-      newReviewCount = prevReviewCount + 1
-    } else {
-      // Failed recall: reset interval, reset review count
-      newIntervalDays = 1
-      newReviewCount = 0
-      newEaseFactor = prevEaseFactor // Keep ease factor on failure
-    }
-
-    // Compute next review date
-    const now = new Date()
-    const nextReviewAt = new Date(now.getTime() + newIntervalDays * 24 * 60 * 60 * 1000)
-
-    // Memory strength: 1.0 right after review (just reviewed)
-    const memoryStrength = 1.0
-
-    // Determine status based on memory strength
-    // Since we just reviewed, status is based on the strength value
-    // But we should also factor in the overall trajectory:
-    // Use a composite: for just-reviewed, use the ease factor and review count as signals
-    let status: string
-    if (memoryStrength < 0.2) {
-      status = 'fragile'
-    } else if (memoryStrength < 0.4) {
-      status = 'shaky'
-    } else if (memoryStrength < 0.6) {
-      status = 'developing'
-    } else if (memoryStrength < 0.8) {
-      status = 'solid'
-    } else {
-      status = 'locked_in'
-    }
-
-    // Update fade level based on rating
-    let newFadeLevel: number
-    if (selfRating === 'nailed_it') {
-      newFadeLevel = Math.min(prevFadeLevel + 1, 5)
-    } else if (selfRating === 'almost') {
-      newFadeLevel = prevFadeLevel
-    } else {
-      // struggling
-      newFadeLevel = Math.max(prevFadeLevel - 1, 0)
-    }
-
-    // XP earned for this review
     const xpMap: Record<string, number> = {
       nailed_it: 10,
       almost: 5,
       struggling: 2,
     }
-    const xpEarned = xpMap[selfRating]
+    // For bulk: award XP once for the whole song, not per chunk
+    const xpEarned = chunkIds.length > 1
+      ? xpMap[selfRating] * 2 // bonus for full song practice
+      : xpMap[selfRating]
 
-    // Upsert progress and update user XP in a transaction
     const result = await prisma.$transaction(async (tx) => {
-      const progress = await tx.userChunkProgress.upsert({
-        where: {
-          userId_chunkId: { userId, chunkId },
-        },
-        create: {
-          userId,
-          chunkId,
-          fadeLevel: newFadeLevel,
-          memoryStrength,
-          easeFactor: newEaseFactor,
-          intervalDays: newIntervalDays,
-          nextReviewAt,
-          reviewCount: newReviewCount,
-          lastReviewedAt: now,
-          status,
-        },
-        update: {
-          fadeLevel: newFadeLevel,
-          memoryStrength,
-          easeFactor: newEaseFactor,
-          intervalDays: newIntervalDays,
-          nextReviewAt,
-          reviewCount: newReviewCount,
-          lastReviewedAt: now,
-          status,
-        },
-        include: {
-          chunk: {
-            include: {
-              song: {
-                select: {
-                  id: true,
-                  title: true,
-                },
-              },
-            },
-          },
-        },
-      })
+      const updatedProgress = []
+      for (const cid of chunkIds) {
+        const existing = progressMap.get(cid)
+        const update = computeChunkUpdate(selfRating, existing ? {
+          easeFactor: existing.easeFactor,
+          intervalDays: existing.intervalDays,
+          reviewCount: existing.reviewCount,
+          fadeLevel: existing.fadeLevel,
+        } : null, inputFadeLevel)
+
+        const progress = await tx.userChunkProgress.upsert({
+          where: { userId_chunkId: { userId, chunkId: cid } },
+          create: { userId, chunkId: cid, ...update },
+          update,
+        })
+        updatedProgress.push(progress)
+      }
 
       // Update user XP
       await tx.user.update({
         where: { id: userId },
-        data: {
-          xp: { increment: xpEarned },
-        },
+        data: { xp: { increment: xpEarned } },
       })
 
-      // Check achievements
+      // Check achievements (use first chunk's song)
+      const songId = chunks[0].song.id
       const unlockedAchievements = await checkAndUnlockAchievements(tx, userId, {
         type: 'chunk_practice',
-        songId: progress.chunk.song.id,
-        chunkCount: 1,
-        perfectCount: selfRating === 'nailed_it' ? 1 : 0,
+        songId,
+        chunkCount: chunkIds.length,
+        perfectCount: selfRating === 'nailed_it' ? chunkIds.length : 0,
       })
 
-      return { progress, unlockedAchievements }
+      return { progress: updatedProgress, unlockedAchievements }
     })
 
+    const firstUpdate = computeChunkUpdate(selfRating, null, inputFadeLevel)
+
     return NextResponse.json({
-      progress: result.progress,
+      progress: chunkIds.length === 1 ? result.progress[0] : result.progress,
       xpEarned,
-      nextReviewAt,
-      intervalDays: newIntervalDays,
+      nextReviewAt: firstUpdate.nextReviewAt,
+      intervalDays: firstUpdate.intervalDays,
       unlockedAchievements: result.unlockedAchievements,
     })
   } catch (error) {

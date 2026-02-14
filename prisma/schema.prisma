@@ -271,18 +271,19 @@ model UserFavoriteSong {
 // ---------------------------------------------------------------------------
 
 model ReferenceVocal {
-  id              String   @id @default(uuid())
-  songId          String
-  voicePart       String
-  sourceTrackId   String
-  isolatedFileUrl String?
-  featuresFileUrl String
-  durationMs      Int
-  demucsModel     String   @default("htdemucs_ft")
-  status          String   @default("PENDING") // PENDING, PROCESSING, READY, FAILED
-  errorMessage    String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                   String   @id @default(uuid())
+  songId               String
+  voicePart            String
+  sourceTrackId        String
+  isolatedFileUrl      String?
+  accompanimentFileUrl String?
+  featuresFileUrl      String
+  durationMs           Int
+  demucsModel          String   @default("htdemucs_ft")
+  status               String   @default("PENDING") // PENDING, PROCESSING, READY, FAILED
+  errorMessage         String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   song               Song                   @relation(fields: [songId], references: [id], onDelete: Cascade)
   sourceTrack        AudioTrack             @relation(fields: [sourceTrackId], references: [id], onDelete: Cascade)

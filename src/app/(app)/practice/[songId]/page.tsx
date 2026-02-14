@@ -8,9 +8,11 @@ import SelfRatingButtons from '@/components/practice/SelfRatingButtons'
 import FadeLevelIndicator from '@/components/practice/FadeLevelIndicator'
 import PracticeSessionSummary from '@/components/practice/PracticeSessionSummary'
 import AudioPlayer from '@/components/audio/AudioPlayer'
+import AudioModeSelector, { type AudioMode } from '@/components/audio/AudioModeSelector'
 import type { AudioActions } from '@/components/audio/AudioPlayer'
 import Button from '@/components/ui/Button'
-import { getNextFadeLevel, type SelfRatingLabel } from '@/lib/fade-engine'
+import { type SelfRatingLabel } from '@/lib/fade-engine'
+import { computeChunkBoundaries, getActiveChunkIndex, type ChunkBoundary } from '@/lib/chunk-boundaries'
 import type { AudioTrackData, VoicePart } from '@/lib/audio/types'
 
 // ---------------------------------------------------------------------------
@@ -25,6 +27,15 @@ interface Chunk {
   status: string
   lineTimestamps: number[] | null
   audioStartMs?: number | null
+  audioEndMs?: number | null
+}
+
+interface ReferenceVocal {
+  id: string
+  voicePart: string
+  isolatedFileUrl: string | null
+  accompanimentFileUrl: string | null
+  durationMs: number
 }
 
 interface SongData {
@@ -35,6 +46,7 @@ interface SongData {
   spotifyEmbed?: string | null
   youtubeVideoId?: string | null
   audioTracks?: AudioTrackData[]
+  referenceVocals?: ReferenceVocal[]
 }
 
 interface Improvement {
@@ -50,6 +62,13 @@ const FADE_LEVEL_LABELS: Record<number, string> = {
   3: 'רמה 3',
   4: 'רמה 4',
   5: 'רמה 5',
+}
+
+// Default audio mode based on fade level
+function getDefaultAudioMode(fadeLevel: number): AudioMode {
+  if (fadeLevel >= 4) return 'music_only'
+  if (fadeLevel >= 3) return 'vocals_only'
+  return 'full_mix'
 }
 
 // ---------------------------------------------------------------------------
@@ -70,11 +89,13 @@ export default function PracticeSessionPage() {
   const [currentChunkIndex, setCurrentChunkIndex] = useState(0)
   const [currentFadeLevel, setCurrentFadeLevel] = useState(0)
   const [manualFadeOverride, setManualFadeOverride] = useState<number | null>(null)
-  const [sessionChunks, setSessionChunks] = useState<
-    { chunkId: string; ratings: SelfRatingLabel[] }[]
-  >([])
   const [isComplete, setIsComplete] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showRating, setShowRating] = useState(false)
+
+  // Audio mode
+  const [audioMode, setAudioMode] = useState<AudioMode>('full_mix')
+  const [userVoicePart, setUserVoicePart] = useState<string | null>(null)
 
   // Summary data
   const [xpEarned, setXpEarned] = useState(0)
@@ -88,11 +109,18 @@ export default function PracticeSessionPage() {
   // Karaoke time tracking
   const [currentTimeMs, setCurrentTimeMs] = useState(0)
 
-  // Manual seek (e.g. from clicking a lyric line)
+  // Manual seek
   const [manualSeekMs, setManualSeekMs] = useState<number | null>(null)
 
   // Toggles
   const [showFullLyrics, setShowFullLyrics] = useState(false)
+
+  // Chunk boundaries for auto-advance
+  const [boundaries, setBoundaries] = useState<ChunkBoundary[]>([])
+
+  // Track whether playback has reached the end
+  const prevChunkIndexRef = useRef(0)
+  const songEndedRef = useRef(false)
 
   // Fetch song data + user chunk progress + audio tracks
   const fetchSong = useCallback(async () => {
@@ -100,11 +128,11 @@ export default function PracticeSessionPage() {
       setLoading(true)
       setError(null)
 
-      // Fetch song, progress, and audio tracks in parallel
-      const [songRes, progressRes, audioRes] = await Promise.all([
+      const [songRes, progressRes, audioRes, userRes] = await Promise.all([
         fetch(`/api/songs/${songId}`),
         fetch(`/api/practice?songId=${songId}`),
         fetch(`/api/songs/${songId}/audio-tracks`),
+        fetch('/api/user/profile'),
       ])
 
       if (!songRes.ok) throw new Error('Failed to fetch song')
@@ -132,6 +160,12 @@ export default function PracticeSessionPage() {
         audioTracks = audioJson.audioTracks ?? []
       }
 
+      // Get user voice part
+      if (userRes.ok) {
+        const userJson = await userRes.json()
+        setUserVoicePart(userJson.user?.voicePart ?? null)
+      }
+
       const songData: SongData = {
         ...raw,
         audioTracks,
@@ -147,12 +181,11 @@ export default function PracticeSessionPage() {
       }
       setSong(songData)
 
-      // Initialize from the first chunk
+      // Compute unified fade level: minimum across all chunks
       if (songData.chunks?.length > 0) {
-        setCurrentFadeLevel(songData.chunks[0].fadeLevel)
-        setSessionChunks(
-          songData.chunks.map((c) => ({ chunkId: c.id, ratings: [] })),
-        )
+        const minFade = Math.min(...songData.chunks.map((c) => c.fadeLevel))
+        setCurrentFadeLevel(minFade)
+        setAudioMode(getDefaultAudioMode(minFade))
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בטעינת השיר')
@@ -166,41 +199,117 @@ export default function PracticeSessionPage() {
     sessionStartRef.current = new Date()
   }, [fetchSong])
 
-  // Auto-seek to chunk start when chunk changes
-  const seekTarget = useMemo(() => {
-    if (!song?.chunks?.[currentChunkIndex]) return null
-    const chunk = song.chunks[currentChunkIndex]
-    if (chunk.lineTimestamps && chunk.lineTimestamps.length > 0) {
-      return Math.max(0, chunk.lineTimestamps[0] - 2000)
+  // Compute chunk boundaries when song loads
+  useEffect(() => {
+    if (!song?.chunks?.length) return
+    // Estimate total duration from audio engine or last chunk
+    const lastChunk = song.chunks[song.chunks.length - 1]
+    let estimatedDuration = 0
+    if (lastChunk.audioEndMs) {
+      estimatedDuration = lastChunk.audioEndMs
+    } else if (lastChunk.lineTimestamps?.length) {
+      // Rough estimate: last timestamp + 30 seconds
+      estimatedDuration = lastChunk.lineTimestamps[lastChunk.lineTimestamps.length - 1] + 30000
     }
-    if (chunk.audioStartMs != null) return chunk.audioStartMs
-    return null
-  }, [currentChunkIndex, song])
+    // Will be updated with actual duration from audio engine
+    const b = computeChunkBoundaries(song.chunks, estimatedDuration || 300000)
+    setBoundaries(b)
+  }, [song])
+
+  // Update boundaries when we get actual audio duration
+  const handleTimeUpdate = useCallback((ms: number) => {
+    setCurrentTimeMs(ms)
+  }, [])
+
+  // Auto-advance chunk based on playback position
+  useEffect(() => {
+    if (boundaries.length === 0 || showRating || isComplete) return
+    const activeIdx = getActiveChunkIndex(boundaries, currentTimeMs)
+    if (activeIdx !== prevChunkIndexRef.current) {
+      prevChunkIndexRef.current = activeIdx
+      setCurrentChunkIndex(activeIdx)
+    }
+    // Detect end of song: playback past last boundary
+    if (
+      boundaries.length > 0 &&
+      currentTimeMs > 0 &&
+      currentTimeMs >= boundaries[boundaries.length - 1].endMs - 500 &&
+      !songEndedRef.current
+    ) {
+      songEndedRef.current = true
+      setShowRating(true)
+    }
+  }, [currentTimeMs, boundaries, showRating, isComplete])
 
   // Current chunk
   const currentChunk = song?.chunks?.[currentChunkIndex] ?? null
 
-  // Effective fade level: manual override > show full > first time > chunk's level
-  const isFirstTime = currentChunk?.status === 'fragile'
+  // Effective fade level: manual override > show full > unified level
   const effectiveFadeLevel =
     manualFadeOverride !== null
       ? manualFadeOverride
-      : (showFullLyrics || isFirstTime) ? 0 : currentFadeLevel
+      : showFullLyrics ? 0 : currentFadeLevel
 
-  // Handle self-rating
+  // Resolve audio tracks based on mode
+  const effectiveAudioTracks = useMemo((): AudioTrackData[] => {
+    if (!song) return []
+    const refs = song.referenceVocals ?? []
+
+    if (audioMode === 'vocals_only') {
+      // Find reference vocal matching user's voice part (or any)
+      const match = refs.find((r) => r.voicePart === userVoicePart && r.isolatedFileUrl)
+        ?? refs.find((r) => r.isolatedFileUrl)
+      if (match?.isolatedFileUrl) {
+        return [{
+          id: `ref-vocal-${match.id}`,
+          songId: song.id,
+          voicePart: (match.voicePart as VoicePart) ?? 'full',
+          fileUrl: match.isolatedFileUrl,
+        }]
+      }
+    }
+
+    if (audioMode === 'music_only') {
+      // Find reference vocal with accompaniment
+      const match = refs.find((r) => r.voicePart === userVoicePart && r.accompanimentFileUrl)
+        ?? refs.find((r) => r.accompanimentFileUrl)
+      if (match?.accompanimentFileUrl) {
+        return [{
+          id: `ref-acc-${match.id}`,
+          songId: song.id,
+          voicePart: 'playback' as VoicePart,
+          fileUrl: match.accompanimentFileUrl,
+        }]
+      }
+    }
+
+    // Default: full mix
+    return song.audioTracks ?? []
+  }, [song, audioMode, userVoicePart])
+
+  // Audio mode availability
+  const audioModeAvailable = useMemo(() => {
+    const refs = song?.referenceVocals ?? []
+    return {
+      fullMix: (song?.audioTracks?.length ?? 0) > 0,
+      vocalsOnly: refs.some((r) => !!r.isolatedFileUrl),
+      musicOnly: refs.some((r) => !!r.accompanimentFileUrl),
+    }
+  }, [song])
+
+  // Handle end-of-song rating
   const handleRate = useCallback(
     async (rating: SelfRatingLabel) => {
-      if (!currentChunk || !song || isSubmitting) return
-
+      if (!song || isSubmitting) return
       setIsSubmitting(true)
 
       try {
-        // Post review to API
+        const chunkIds = song.chunks.map((c) => c.id)
         const res = await fetch('/api/practice/review', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            chunkId: currentChunk.id,
+            chunkIds,
             selfRating: rating,
             fadeLevel: currentFadeLevel,
           }),
@@ -208,79 +317,41 @@ export default function PracticeSessionPage() {
 
         if (res.ok) {
           const result = await res.json()
-          // Track improvements
-          if (result.improvement) {
-            setImprovements((prev) => [
-              ...prev,
-              {
-                chunkLabel: currentChunk.label,
-                oldStatus: result.improvement.oldStatus,
-                newStatus: result.improvement.newStatus,
-              },
-            ])
-          }
-          // Accumulate XP
-          if (result.xp) {
-            setXpEarned((prev) => prev + result.xp)
-          }
-          if (result.streak !== undefined) {
-            setStreak(result.streak)
-          }
+          if (result.xpEarned) setXpEarned(result.xpEarned)
         }
       } catch {
-        // Non-critical — continue the session even if the POST fails
+        // Non-critical
       }
 
-      // Track rating in session
-      setSessionChunks((prev) => {
-        const updated = [...prev]
-        if (updated[currentChunkIndex]) {
-          updated[currentChunkIndex] = {
-            ...updated[currentChunkIndex],
-            ratings: [...updated[currentChunkIndex].ratings, rating],
-          }
-        }
-        return updated
-      })
-
-      // Calculate next fade level
-      const nextFade = getNextFadeLevel(currentFadeLevel, rating)
-
-      // Advance to next chunk or complete
-      const nextIndex = currentChunkIndex + 1
-      if (nextIndex >= (song?.chunks.length ?? 0)) {
-        // Session complete — post summary
-        try {
-          await fetch('/api/practice', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              songId,
-              startedAt: sessionStartRef.current.toISOString(),
-              completedAt: new Date().toISOString(),
-              chunks: sessionChunks,
-            }),
-          })
-        } catch {
-          // Non-critical
-        }
-        setIsComplete(true)
-      } else {
-        setCurrentChunkIndex(nextIndex)
-        setCurrentTimeMs(0)
-        setManualSeekMs(null)
-        setManualFadeOverride(null) // reset manual override on chunk change
-        // Use the next chunk's stored fade level, or the computed next level
-        const nextChunkFade = song?.chunks[nextIndex]?.fadeLevel ?? nextFade
-        setCurrentFadeLevel(nextChunkFade)
+      // Post practice session summary
+      try {
+        await fetch('/api/practice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            songId,
+            startedAt: sessionStartRef.current.toISOString(),
+            completedAt: new Date().toISOString(),
+            chunks: song.chunks.map((c) => ({ chunkId: c.id, ratings: [rating] })),
+          }),
+        })
+      } catch {
+        // Non-critical
       }
 
+      setIsComplete(true)
       setIsSubmitting(false)
     },
-    [currentChunk, currentChunkIndex, currentFadeLevel, isSubmitting, song, songId, sessionChunks],
+    [song, currentFadeLevel, isSubmitting, songId],
   )
 
-  // Keyboard navigation: arrow keys seek audio ±3s
+  // Skip to rating manually (e.g. if the song doesn't end automatically)
+  const handleEndSong = useCallback(() => {
+    audioActionsRef.current?.pause()
+    setShowRating(true)
+  }, [])
+
+  // Keyboard navigation
   useEffect(() => {
     if (!song || isComplete) return
     function handleKeyDown(e: KeyboardEvent) {
@@ -307,10 +378,7 @@ export default function PracticeSessionPage() {
     setManualSeekMs(timestampMs)
   }, [])
 
-  // Word reveal handler
-  const handleWordReveal = useCallback((index: number) => {
-    // Could track reveals for analytics; no-op for now
-  }, [])
+  const handleWordReveal = useCallback(() => {}, [])
 
   // -- Loading state --
   if (loading) {
@@ -362,7 +430,30 @@ export default function PracticeSessionPage() {
     )
   }
 
-  // -- Active practice --
+  // -- End-of-song rating --
+  if (showRating) {
+    return (
+      <div dir="rtl" className="flex flex-col items-center justify-center min-h-[calc(100vh-12rem)] text-start gap-8 px-4">
+        <div className="text-center space-y-2">
+          <h2 className="text-2xl font-bold">{song.title}</h2>
+          <p className="text-lg text-text-muted">איך היה הביצוע הכולל?</p>
+        </div>
+
+        <div className="w-full max-w-md">
+          <SelfRatingButtons onRate={handleRate} disabled={isSubmitting} />
+        </div>
+
+        {isSubmitting && (
+          <div className="flex items-center gap-2 text-sm text-text-muted">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            שומר...
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // -- Active practice (continuous karaoke) --
   return (
     <div dir="rtl" className="flex flex-col min-h-[calc(100vh-12rem)] text-start">
       {/* Top: Fade level indicator */}
@@ -373,53 +464,43 @@ export default function PracticeSessionPage() {
           chunkLabel={currentChunk?.label ?? ''}
         />
 
-        {/* Progress through chunks + nav + edit link */}
+        {/* Progress through chunks (auto-advancing indicator) */}
         <div className="mt-3 flex items-center gap-2 text-sm text-text-muted">
-          <button
-            type="button"
-            disabled={currentChunkIndex === 0}
-            onClick={() => {
-              const prevIdx = currentChunkIndex - 1
-              setCurrentChunkIndex(prevIdx)
-              setCurrentTimeMs(0)
-              setManualSeekMs(null)
-              setManualFadeOverride(null)
-              setCurrentFadeLevel(song.chunks[prevIdx]?.fadeLevel ?? 0)
-            }}
-            className="rounded-full p-2.5 hover:bg-surface-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            aria-label="קטע קודם"
-          >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-          <span>
-            קטע {currentChunkIndex + 1} מתוך {song.chunks.length}
+          {/* Chunk dots */}
+          <div className="flex items-center gap-1">
+            {song.chunks.map((c, i) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => {
+                  if (boundaries[i]) {
+                    setManualSeekMs(boundaries[i].startMs)
+                  }
+                  setCurrentChunkIndex(i)
+                }}
+                className={[
+                  'h-2.5 rounded-full transition-all duration-300',
+                  i === currentChunkIndex
+                    ? 'w-6 bg-primary'
+                    : i < currentChunkIndex
+                      ? 'w-2.5 bg-primary/40'
+                      : 'w-2.5 bg-border',
+                ].join(' ')}
+                title={c.label}
+              />
+            ))}
+          </div>
+          <span className="text-xs">
+            {currentChunk?.label}
           </span>
+
+          {/* End song button */}
           <button
             type="button"
-            disabled={currentChunkIndex >= song.chunks.length - 1}
-            onClick={() => {
-              const nextIdx = currentChunkIndex + 1
-              setCurrentChunkIndex(nextIdx)
-              setCurrentTimeMs(0)
-              setManualSeekMs(null)
-              setManualFadeOverride(null)
-              setCurrentFadeLevel(song.chunks[nextIdx]?.fadeLevel ?? 0)
-            }}
-            className="rounded-full p-2.5 hover:bg-surface-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            aria-label="קטע הבא"
-          >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => router.push(`/songs/${songId}/edit`)}
+            onClick={handleEndSong}
             className="ms-auto text-xs text-primary hover:underline"
           >
-            עריכה
+            סיום ודירוג
           </button>
         </div>
 
@@ -443,9 +524,6 @@ export default function PracticeSessionPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={showFullLyrics ? 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z' : 'M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l18 18'} />
             </svg>
             {showFullLyrics ? 'מילים מלאות' : 'הצג הכל'}
-            {isFirstTime && !showFullLyrics && manualFadeOverride === null && (
-              <span className="text-[12px] opacity-70">(ראשונה)</span>
-            )}
           </button>
 
           {/* Manual fade level selector */}
@@ -474,45 +552,57 @@ export default function PracticeSessionPage() {
             })}
           </div>
         </div>
+
+        {/* Audio mode selector */}
+        {(audioModeAvailable.vocalsOnly || audioModeAvailable.musicOnly) && (
+          <div className="mt-2">
+            <AudioModeSelector
+              available={audioModeAvailable}
+              selected={audioMode}
+              onChange={setAudioMode}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Audio player — handles Howler/YouTube/Spotify with voice part switching */}
+      {/* Audio player */}
       <div className="mb-4">
         <AudioPlayer
-          audioTracks={song.audioTracks ?? []}
-          youtubeVideoId={song.youtubeVideoId}
-          spotifyTrackId={song.spotifyTrackId}
-          onTimeUpdate={setCurrentTimeMs}
-          seekToMs={manualSeekMs ?? seekTarget}
+          key={audioMode} // re-mount when mode changes to load new track
+          audioTracks={effectiveAudioTracks}
+          youtubeVideoId={audioMode === 'full_mix' ? song.youtubeVideoId : undefined}
+          spotifyTrackId={audioMode === 'full_mix' ? song.spotifyTrackId : undefined}
+          onTimeUpdate={handleTimeUpdate}
+          seekToMs={manualSeekMs}
           actionsRef={audioActionsRef}
         />
       </div>
 
-      {/* Middle: Lyrics display */}
-      <div className="flex-1 rounded-xl border border-border bg-surface p-4 sm:p-6 mb-6 overflow-y-auto practice-scroll">
+      {/* Middle: Lyrics display with chunk transition */}
+      <div className="flex-1 rounded-xl border border-border bg-surface p-4 sm:p-6 mb-6 overflow-y-auto practice-scroll relative">
         {currentChunk && (
-          currentChunk.lineTimestamps ? (
-            <KaraokeDisplay
-              lyrics={currentChunk.lyrics}
-              fadeLevel={effectiveFadeLevel}
-              timestamps={currentChunk.lineTimestamps}
-              currentTimeMs={currentTimeMs}
-              onWordReveal={handleWordReveal}
-              onLineClick={handleLineSeek}
-            />
-          ) : (
-            <FadeOutDisplay
-              lyrics={currentChunk.lyrics}
-              fadeLevel={effectiveFadeLevel}
-              onWordReveal={handleWordReveal}
-            />
-          )
+          <div
+            key={currentChunk.id}
+            className="animate-in fade-in duration-300"
+          >
+            {currentChunk.lineTimestamps ? (
+              <KaraokeDisplay
+                lyrics={currentChunk.lyrics}
+                fadeLevel={effectiveFadeLevel}
+                timestamps={currentChunk.lineTimestamps}
+                currentTimeMs={currentTimeMs}
+                onWordReveal={handleWordReveal}
+                onLineClick={handleLineSeek}
+              />
+            ) : (
+              <FadeOutDisplay
+                lyrics={currentChunk.lyrics}
+                fadeLevel={effectiveFadeLevel}
+                onWordReveal={handleWordReveal}
+              />
+            )}
+          </div>
         )}
-      </div>
-
-      {/* Bottom: Rating buttons */}
-      <div className="pb-4">
-        <SelfRatingButtons onRate={handleRate} disabled={isSubmitting} />
       </div>
     </div>
   )
