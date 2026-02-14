@@ -88,5 +88,5 @@ export function getCachedSongs(
 }
 
 export function invalidateSongsCache() {
-  revalidateTag('songs-v2')
+  revalidateTag('songs-v2', 'max')
 }
