@@ -68,7 +68,7 @@ def score_recording(
     )
 
     section_scores = _compute_section_scores(alignment, user_features)
-    problem_areas = _identify_problem_areas(alignment, user_features)
+    problem_areas = _identify_problem_areas(alignment, user_features, ref_features)
 
     result = {
         "overallScore": round(overall, 1),
@@ -224,17 +224,21 @@ def _compute_section_scores(alignment: dict, user_features: dict) -> list[dict]:
 def _identify_problem_areas(
     alignment: dict,
     user_features: dict,
+    ref_features: dict | None = None,
     window_s: float = 2.0,
 ) -> list[dict]:
     """Identify up to 3 worst time windows in the recording.
 
     Slides a *window_s*-second window across the user recording timeline
     and finds the windows with the lowest combined scores.
+    Also maps each window to the corresponding reference vocal timestamps
+    so the frontend can play both clips side by side.
     """
     user_times = user_features.get("pitch_times", [])
     if not user_times:
         return []
 
+    ref_times = ref_features.get("pitch_times", []) if ref_features else []
     duration = user_times[-1]
     step = window_s / 2  # 50 % overlap
     path = alignment["path"]
@@ -248,6 +252,7 @@ def _identify_problem_areas(
         w_pitch = []
         w_timing = []
         w_dynamics = []
+        w_ref_times = []  # corresponding reference timestamps
 
         for pair_idx, (u_idx, r_idx) in enumerate(path):
             if u_idx >= len(user_times):
@@ -263,6 +268,10 @@ def _identify_problem_areas(
             er = alignment["energy_ratios"][pair_idx]
             if er is not None:
                 w_dynamics.append(er)
+
+            # Track the reference time for this aligned pair
+            if r_idx < len(ref_times):
+                w_ref_times.append(ref_times[r_idx])
 
         if w_pitch:
             avg_dev = float(np.mean(w_pitch))
@@ -285,7 +294,7 @@ def _identify_problem_areas(
                     + avg_off / TIMING_ZERO_S * WEIGHT_TIMING
                     + abs(1.0 - avg_ratio) * WEIGHT_DYNAMICS
                 )
-                windows.append({
+                entry = {
                     "startTime": round(t_start, 2),
                     "endTime": round(t_end, 2),
                     "issues": issues,
@@ -293,7 +302,12 @@ def _identify_problem_areas(
                     "avgTimingOffsetMs": round(avg_off * 1000, 1),
                     "avgEnergyRatio": round(avg_ratio, 3),
                     "badness": badness,
-                })
+                }
+                # Add corresponding reference timestamps for playback
+                if w_ref_times:
+                    entry["refStartTime"] = round(min(w_ref_times), 2)
+                    entry["refEndTime"] = round(max(w_ref_times), 2)
+                windows.append(entry)
 
         t += step
 

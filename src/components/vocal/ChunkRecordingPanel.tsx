@@ -39,6 +39,8 @@ interface ProblemArea {
   avgPitchDevCents: number
   avgTimingOffsetMs: number
   avgEnergyRatio: number
+  refStartTime?: number
+  refEndTime?: number
 }
 
 interface SessionResult {
@@ -310,6 +312,29 @@ export default function ChunkRecordingPanel({
     }
     setRecordingBlobUrl(null)
   }, [recorder.audioBlob])
+
+  // Audio refs for snippet playback in problem areas
+  const userAudioRef = useRef<HTMLAudioElement | null>(null)
+  const refAudioRef = useRef<HTMLAudioElement | null>(null)
+  const snippetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const playSnippet = useCallback((
+    audioRef: React.RefObject<HTMLAudioElement | null>,
+    startTime: number,
+    endTime: number,
+  ) => {
+    const el = audioRef.current
+    if (!el) return
+    // Stop any previously playing snippet
+    if (snippetTimerRef.current) clearTimeout(snippetTimerRef.current)
+    userAudioRef.current?.pause()
+    refAudioRef.current?.pause()
+    // Seek and play
+    el.currentTime = startTime
+    el.play()
+    const durationMs = (endTime - startTime) * 1000 + 300 // small buffer
+    snippetTimerRef.current = setTimeout(() => el.pause(), durationMs)
+  }, [])
 
   // withBacking defaults to true — user can toggle manually
   const [jobId, setJobId] = useState<string | null>(null)
@@ -683,6 +708,14 @@ export default function ChunkRecordingPanel({
               />
             )}
 
+            {/* Hidden audio elements for snippet playback */}
+            {result.isolatedVocalUrl && (
+              <audio ref={refAudioRef} src={result.isolatedVocalUrl} preload="auto" className="hidden" />
+            )}
+            {recordingBlobUrl && (
+              <audio ref={userAudioRef} src={recordingBlobUrl} preload="auto" className="hidden" />
+            )}
+
             {result.problemAreas.length > 0 && (
               <div className="space-y-2">
                 <h3 className="text-sm font-semibold text-foreground">{'אזורים לשיפור'}</h3>
@@ -693,7 +726,7 @@ export default function ChunkRecordingPanel({
                     dynamics: 'דינמיקה',
                   }
                   return (
-                    <div key={i} className="rounded-lg border border-border bg-surface p-3">
+                    <div key={i} className="rounded-lg border border-border bg-surface p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-foreground" dir="ltr">
                           {area.startTime.toFixed(1)}s - {area.endTime.toFixed(1)}s
@@ -705,6 +738,29 @@ export default function ChunkRecordingPanel({
                             </span>
                           ))}
                         </div>
+                      </div>
+                      {/* Playback buttons */}
+                      <div className="flex gap-2">
+                        {recordingBlobUrl && (
+                          <button
+                            type="button"
+                            onClick={() => playSnippet(userAudioRef, area.startTime, area.endTime)}
+                            className="flex items-center gap-1.5 rounded-full bg-border/20 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-border/40 transition-colors"
+                          >
+                            <span>{'▶'}</span>
+                            <span>{'ההקלטה שלך'}</span>
+                          </button>
+                        )}
+                        {result.isolatedVocalUrl && area.refStartTime != null && (
+                          <button
+                            type="button"
+                            onClick={() => playSnippet(refAudioRef, area.refStartTime!, area.refEndTime!)}
+                            className="flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+                          >
+                            <span>{'▶'}</span>
+                            <span>{'איך צריך להישמע'}</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   )
