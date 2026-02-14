@@ -57,8 +57,19 @@ image = (
         "demucs",
     )
     .env({"TORCHAUDIO_BACKEND": "soundfile"})
-    # Pre-download Demucs model into image so it's not fetched at runtime
-    .run_commands("python -c \"from demucs.pretrained import get_model; get_model('htdemucs_ft')\"")
+    # Pre-download Demucs model into image so it's not fetched at runtime.
+    # Downloads both checkpoint files to the torch hub cache.
+    .run_commands(
+        "python -c \""
+        "import torch; "
+        "torch.hub.load_state_dict_from_url("
+        "'https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/f7e0c4bc-ba3fe64a.th', "
+        "map_location='cpu'); "
+        "torch.hub.load_state_dict_from_url("
+        "'https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/d12395a8-e57c48e6.th', "
+        "map_location='cpu')"
+        "\""
+    )
     .add_local_file("processing.py", "/root/processing.py")
     .add_local_file("scoring.py", "/root/scoring.py")
     .add_local_file("coaching.py", "/root/coaching.py")
