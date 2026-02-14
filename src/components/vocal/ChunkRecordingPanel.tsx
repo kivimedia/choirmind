@@ -144,6 +144,94 @@ function parsePracticeSession(ps: Record<string, unknown>): SessionResult {
 }
 
 // ---------------------------------------------------------------------------
+// Analyzing progress indicator
+// ---------------------------------------------------------------------------
+
+const ANALYSIS_STEPS = [
+  { label: 'ההקלטה הועלתה בהצלחה', delayMs: 0 },
+  { label: 'מוריד את ההקלטה לשרת העיבוד', delayMs: 3000 },
+  { label: 'מפריד קול מרעשי רקע (Demucs AI)', delayMs: 8000 },
+  { label: 'מחלץ מאפייני קול — גובה, תזמון, עוצמה', delayMs: 40000 },
+  { label: 'טוען קול ייחוס להשוואה', delayMs: 55000 },
+  { label: 'מחשב ציון ע"י השוואת ביצוע', delayMs: 70000 },
+  { label: 'יוצר טיפים אישיים עם AI', delayMs: 90000 },
+  { label: 'שומר תוצאות...', delayMs: 110000 },
+]
+
+function AnalyzingProgress({ onCancel }: { onCancel: () => void }) {
+  const [activeStep, setActiveStep] = useState(0)
+  const [elapsed, setElapsed] = useState(0)
+  const startRef = useRef(Date.now())
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const ms = Date.now() - startRef.current
+      setElapsed(ms)
+      // Advance to the latest step whose delay has passed
+      for (let i = ANALYSIS_STEPS.length - 1; i >= 0; i--) {
+        if (ms >= ANALYSIS_STEPS[i].delayMs) {
+          setActiveStep(i)
+          break
+        }
+      }
+    }, 500)
+    return () => clearInterval(interval)
+  }, [])
+
+  return (
+    <div className="space-y-4 py-2">
+      {/* Steps list */}
+      <div className="space-y-2">
+        {ANALYSIS_STEPS.map((s, i) => {
+          const isDone = i < activeStep
+          const isActive = i === activeStep
+          const isPending = i > activeStep
+          return (
+            <div
+              key={i}
+              className={[
+                'flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-all duration-300',
+                isActive ? 'bg-primary/10 text-foreground font-medium' : '',
+                isDone ? 'text-text-muted' : '',
+                isPending ? 'text-text-muted/40' : '',
+              ].join(' ')}
+            >
+              {isDone && (
+                <svg className="h-4 w-4 shrink-0 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+              {isActive && (
+                <svg className="h-4 w-4 shrink-0 animate-spin text-primary" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              )}
+              {isPending && (
+                <div className="h-4 w-4 shrink-0 rounded-full border-2 border-border/40" />
+              )}
+              <span>{s.label}</span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Elapsed time */}
+      <p className="text-center text-xs text-text-muted tabular-nums" dir="ltr">
+        {Math.floor(elapsed / 1000)}s
+      </p>
+
+      <button
+        onClick={onCancel}
+        className="mx-auto block text-xs text-text-muted hover:text-foreground"
+      >
+        {'ביטול'}
+      </button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -483,24 +571,13 @@ export default function ChunkRecordingPanel({
 
         {/* ==================== Analyzing ==================== */}
         {step === 'analyzing' && (
-          <div className="flex flex-col items-center gap-3 py-4">
-            <svg className="animate-spin h-8 w-8 text-primary" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            <p className="text-sm text-foreground">{'מנתח את הביצוע שלכם...'}</p>
-            <p className="text-xs text-text-muted">{'בדרך כלל 10-30 שניות'}</p>
-            <button
-              onClick={() => {
-                if (pollRef.current) clearInterval(pollRef.current)
-                setStep('ready')
-                recorder.reset()
-              }}
-              className="mt-2 text-xs text-text-muted hover:text-foreground"
-            >
-              {'ביטול'}
-            </button>
-          </div>
+          <AnalyzingProgress
+            onCancel={() => {
+              if (pollRef.current) clearInterval(pollRef.current)
+              setStep('ready')
+              recorder.reset()
+            }}
+          />
         )}
 
         {/* ==================== Results ==================== */}
