@@ -7,7 +7,7 @@ interface SpeedControlProps {
 
 const STEP = 0.05
 const MIN_RATE = 0.5
-const MAX_RATE = 1.25
+const MAX_RATE = 2
 
 export default function SpeedControl({ rate, onRateChange }: SpeedControlProps) {
   const canDecrease = rate > MIN_RATE

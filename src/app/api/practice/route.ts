@@ -72,9 +72,64 @@ export async function GET(request: NextRequest) {
         })
       : reviewQueue
 
+    // Map to dueChunks format for the practice page
+    const dueChunks = filtered.map((item) => ({
+      chunkId: item.chunkId,
+      songId: item.chunk.song.id,
+      songTitle: item.chunk.song.title,
+      chunkLabel: item.chunk.label,
+      status: item.status,
+      fadeLevel: item.fadeLevel,
+    }))
+
+    // Fetch user stats
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { xp: true, currentStreak: true },
+    })
+
+    // Fetch all songs for free practice
+    const songWhere: Record<string, unknown> = {}
+    if (filterChoirId) {
+      songWhere.OR = [
+        { choirId: filterChoirId },
+        { isPersonal: true, createdById: userId },
+      ]
+    } else {
+      // All songs in user's choirs + personal
+      const memberships = await prisma.choirMember.findMany({
+        where: { userId },
+        select: { choirId: true },
+      })
+      const choirIds = memberships.map((m) => m.choirId)
+      songWhere.OR = [
+        { choirId: { in: choirIds } },
+        { isPersonal: true, createdById: userId },
+      ]
+    }
+
+    const songs = await prisma.song.findMany({
+      where: songWhere,
+      select: {
+        id: true,
+        title: true,
+        _count: { select: { chunks: true } },
+      },
+      orderBy: { title: 'asc' },
+    })
+
     return NextResponse.json({
-      reviewQueue: filtered,
-      count: filtered.length,
+      dueChunks,
+      songs: songs.map((s) => ({
+        id: s.id,
+        title: s.title,
+        chunkCount: s._count.chunks,
+      })),
+      stats: {
+        streak: user?.currentStreak ?? 0,
+        xp: user?.xp ?? 0,
+        dueCount: dueChunks.length,
+      },
     })
   } catch (error) {
     console.error('GET /api/practice error:', error)

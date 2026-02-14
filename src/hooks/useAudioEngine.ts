@@ -283,7 +283,7 @@ export function useAudioEngine(options: UseAudioEngineOptions): AudioEngineState
   }, [])
 
   const setPlaybackRate = useCallback((rate: number) => {
-    const clamped = Math.max(0.5, Math.min(1.25, rate))
+    const clamped = Math.max(0.5, Math.min(2, rate))
     setPlaybackRateState(clamped)
     if (howlRef.current) {
       howlRef.current.rate(clamped)
