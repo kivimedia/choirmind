@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useTranslations } from 'next-intl'
@@ -110,6 +110,7 @@ export default function SongDetailPage() {
   const [quota, setQuota] = useState<QuotaInfo | null>(null)
 
   const audioActionsRef = useRef<AudioActions | null>(null)
+  const [currentTimeMs, setCurrentTimeMs] = useState(0)
 
   const isDirector = session?.user?.role === 'director'
   const userVoicePart = (session?.user as any)?.voicePart ?? 'soprano'
@@ -133,6 +134,10 @@ export default function SongDetailPage() {
     }
     if (songId) fetchSong()
   }, [songId, tCommon])
+
+  const handleTimeUpdate = useCallback((ms: number) => {
+    setCurrentTimeMs(ms)
+  }, [])
 
   // Spacebar to pause/unpause audio
   useEffect(() => {
@@ -205,6 +210,16 @@ export default function SongDetailPage() {
       default:
         return tChunks('custom')
     }
+  }
+
+  /** Find the active line index given timestamps and current playback time. */
+  function getActiveLineIdx(timestamps: number[], timeMs: number): number {
+    let active = -1
+    for (let i = 0; i < timestamps.length; i++) {
+      if (timestamps[i] - 500 <= timeMs) active = i
+      else break
+    }
+    return active
   }
 
   function getStatusLabel(status?: string): string {
@@ -351,6 +366,7 @@ export default function SongDetailPage() {
           youtubeVideoId={song.youtubeVideoId}
           spotifyTrackId={song.spotifyTrackId}
           actionsRef={audioActionsRef}
+          onTimeUpdate={handleTimeUpdate}
           locale={song.language === 'en' ? 'en' : 'he'}
         />
       ) : (
@@ -449,12 +465,36 @@ export default function SongDetailPage() {
                       </span>
                     )}
                   </div>
-                  <p
-                    className="whitespace-pre-line text-sm leading-relaxed text-foreground"
+                  <div
+                    className="text-sm leading-relaxed text-foreground"
                     dir={song.textDirection === 'rtl' ? 'rtl' : song.textDirection === 'ltr' ? 'ltr' : 'auto'}
                   >
-                    {chunk.lyrics}
-                  </p>
+                    {(() => {
+                      const timestamps = chunk.lineTimestamps ? JSON.parse(chunk.lineTimestamps) as number[] : null
+                      if (!timestamps || currentTimeMs === 0) {
+                        return <p className="whitespace-pre-line">{chunk.lyrics}</p>
+                      }
+                      const rawLines = chunk.lyrics.split('\n')
+                      // Map non-empty line index to raw line index
+                      const nonEmptyMap: number[] = []
+                      rawLines.forEach((l, i) => { if (l.trim()) nonEmptyMap.push(i) })
+                      const activeNonEmpty = getActiveLineIdx(timestamps, currentTimeMs)
+                      const activeRaw = activeNonEmpty >= 0 ? nonEmptyMap[activeNonEmpty] : -1
+
+                      return rawLines.map((line, i) => (
+                        <p
+                          key={i}
+                          className={[
+                            'min-h-[1.4em] transition-all duration-200',
+                            i === activeRaw ? 'text-primary font-bold' : '',
+                            activeRaw >= 0 && nonEmptyMap.indexOf(i) >= 0 && nonEmptyMap.indexOf(i) < activeNonEmpty ? 'opacity-50' : '',
+                          ].join(' ')}
+                        >
+                          {line || '\u00A0'}
+                        </p>
+                      ))
+                    })()}
+                  </div>
                 </div>
 
                 {/* Record button + Memory status */}
@@ -516,6 +556,7 @@ export default function SongDetailPage() {
               )?.fileUrl ?? null
               : null
           }
+          referenceVocals={song.referenceVocals ?? []}
         />
       )}
 

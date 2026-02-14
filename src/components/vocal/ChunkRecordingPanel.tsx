@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import ScoreDial from './ScoreDial'
@@ -54,6 +54,15 @@ interface SessionResult {
   isMock?: boolean
 }
 
+interface ReferenceVocalInfo {
+  id: string
+  voicePart: string
+  isolatedFileUrl: string | null
+  accompanimentFileUrl?: string | null
+}
+
+type RecordingAudioMode = 'full_mix' | 'vocals_only' | 'music_only'
+
 interface ChunkRecordingPanelProps {
   isOpen: boolean
   onClose: () => void
@@ -66,6 +75,8 @@ interface ChunkRecordingPanelProps {
   hasAudio: boolean
   /** Direct URL of the backing track for standalone playback during recording. */
   backingTrackUrl?: string | null
+  /** Reference vocals for mode switching during recording. */
+  referenceVocals?: ReferenceVocalInfo[]
 }
 
 // ---------------------------------------------------------------------------
@@ -240,21 +251,35 @@ export default function ChunkRecordingPanel({
   audioActions,
   hasAudio,
   backingTrackUrl,
+  referenceVocals = [],
 }: ChunkRecordingPanelProps) {
   const [step, setStep] = useState<Step>('ready')
   const [withBacking, setWithBacking] = useState(true)
+  const [recordingAudioMode, setRecordingAudioMode] = useState<RecordingAudioMode>('full_mix')
+
+  // Compute effective backing URL based on audio mode
+  const effectiveBackingUrl = useMemo(() => {
+    if (!withBacking || !hasAudio) return null
+    const ref = referenceVocals.find((r) => r.voicePart === voicePart) ?? referenceVocals[0]
+    if (recordingAudioMode === 'vocals_only' && ref?.isolatedFileUrl) return ref.isolatedFileUrl
+    if (recordingAudioMode === 'music_only' && ref?.accompanimentFileUrl) return ref.accompanimentFileUrl
+    return backingTrackUrl ?? null
+  }, [withBacking, hasAudio, recordingAudioMode, referenceVocals, voicePart, backingTrackUrl])
+
+  const hasVocalsOnly = referenceVocals.some((r) => !!r.isolatedFileUrl)
+  const hasMusicOnly = referenceVocals.some((r) => !!r.accompanimentFileUrl)
 
   // Pre-fetch backing track as ArrayBuffer for Web Audio API playback
   const [backingBuffer, setBackingBuffer] = useState<ArrayBuffer | null>(null)
   const [backingLoading, setBackingLoading] = useState(false)
   useEffect(() => {
-    if (!isOpen || !backingTrackUrl || !withBacking) {
+    if (!isOpen || !effectiveBackingUrl || !withBacking) {
       setBackingBuffer(null)
       setBackingLoading(false)
       return
     }
     setBackingLoading(true)
-    fetch(backingTrackUrl)
+    fetch(effectiveBackingUrl)
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.arrayBuffer()
@@ -268,7 +293,7 @@ export default function ChunkRecordingPanel({
         setBackingBuffer(null)
         setBackingLoading(false)
       })
-  }, [isOpen, backingTrackUrl, withBacking])
+  }, [isOpen, effectiveBackingUrl, withBacking])
 
   const recorder = useVocalRecorder(
     withBacking && hasAudio ? { backingTrackBuffer: backingBuffer } : undefined
@@ -493,6 +518,34 @@ export default function ChunkRecordingPanel({
                   </p>
                 </div>
               </label>
+            )}
+
+            {/* Audio mode selector for backing track */}
+            {withBacking && hasAudio && (hasVocalsOnly || hasMusicOnly) && (
+              <div className="flex items-center gap-1 rounded-full border border-border bg-surface px-1.5 py-1">
+                {([
+                  { key: 'full_mix' as const, label: 'שיר מלא', available: true },
+                  { key: 'vocals_only' as const, label: 'קול בלבד', available: hasVocalsOnly },
+                  { key: 'music_only' as const, label: 'מוזיקה בלבד', available: hasMusicOnly },
+                ]).map(({ key, label, available }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    disabled={!available}
+                    onClick={() => setRecordingAudioMode(key)}
+                    className={[
+                      'rounded-full px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors',
+                      recordingAudioMode === key
+                        ? 'bg-primary text-white'
+                        : available
+                          ? 'text-text-muted hover:bg-surface-hover'
+                          : 'text-text-muted/40 cursor-not-allowed',
+                    ].join(' ')}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             )}
 
             {errorMsg && (
