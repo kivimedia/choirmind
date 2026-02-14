@@ -322,7 +322,7 @@ export default function ChunkRecordingPanel({
     if (step !== 'analyzing' || !jobId) return
 
     let attempts = 0
-    const maxAttempts = 60 // ~3 min timeout
+    const maxAttempts = 100 // ~5 min timeout
 
     pollRef.current = setInterval(async () => {
       attempts++
