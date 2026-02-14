@@ -82,11 +82,11 @@ export function getCachedSongs(
 ) {
   return unstable_cache(
     () => fetchSongs(choirIds, filterChoirId, userId, showArchived),
-    ['songs', userId, choirIds.sort().join(','), filterChoirId ?? '', String(showArchived)],
-    { tags: ['songs'] }
+    ['songs-v2', userId, choirIds.sort().join(','), filterChoirId ?? '', String(showArchived)],
+    { tags: ['songs-v2'] }
   )()
 }
 
 export function invalidateSongsCache() {
-  revalidateTag('songs', 'max')
+  revalidateTag('songs-v2')
 }
