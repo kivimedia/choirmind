@@ -539,6 +539,30 @@ def _get_s3_client():
     )
 
 
+def _convert_to_wav(audio_bytes: bytes) -> bytes:
+    """Convert any audio format (webm, opus, mp3, etc.) to WAV using librosa."""
+    import librosa
+    import soundfile as sf
+    import io
+
+    # Write input to a temp file (librosa needs a file path)
+    with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp_in:
+        tmp_in.write(audio_bytes)
+        tmp_in_path = tmp_in.name
+
+    tmp_out_path = tmp_in_path.replace(".webm", ".wav")
+    try:
+        y, sr = librosa.load(tmp_in_path, sr=22050, mono=True)
+        sf.write(tmp_out_path, y, sr)
+        with open(tmp_out_path, "rb") as f:
+            return f.read()
+    finally:
+        if os.path.exists(tmp_in_path):
+            os.unlink(tmp_in_path)
+        if os.path.exists(tmp_out_path):
+            os.unlink(tmp_out_path)
+
+
 def _download_from_s3(s3_key: str, local_path: str):
     """Download an object from S3 to a local path."""
     bucket = os.environ["AWS_S3_BUCKET"]
@@ -822,8 +846,8 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
             )
             vocal_bytes = demucs_result["vocals"]
         else:
-            logger.info("Headphones used -- skipping vocal isolation")
-            vocal_bytes = recording_bytes
+            logger.info("Headphones used -- skipping vocal isolation, converting to WAV")
+            vocal_bytes = _convert_to_wav(recording_bytes)
         timings["isolate"] = time.time() - t1
         logger.info("[PROFILE] isolate: %.1fs", timings["isolate"])
 
