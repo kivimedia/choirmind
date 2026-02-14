@@ -14,6 +14,7 @@ import AudioPlayer from '@/components/audio/AudioPlayer'
 import type { AudioActions } from '@/components/audio/AudioPlayer'
 import type { AudioTrackData, VoicePart } from '@/lib/audio/types'
 import ChunkRecordingPanel from '@/components/vocal/ChunkRecordingPanel'
+import FullSongRecordingPanel from '@/components/vocal/FullSongRecordingPanel'
 import VocalQuotaBanner from '@/components/vocal/VocalQuotaBanner'
 
 interface Chunk {
@@ -36,6 +37,7 @@ interface ReferenceVocal {
   id: string
   voicePart: string
   isolatedFileUrl: string
+  accompanimentFileUrl?: string | null
   durationMs: number
 }
 
@@ -104,6 +106,7 @@ export default function SongDetailPage() {
   const [archiveModalOpen, setArchiveModalOpen] = useState(false)
   const [archiving, setArchiving] = useState(false)
   const [recordingChunk, setRecordingChunk] = useState<Chunk | null>(null)
+  const [fullSongRecording, setFullSongRecording] = useState(false)
   const [quota, setQuota] = useState<QuotaInfo | null>(null)
 
   const audioActionsRef = useRef<AudioActions | null>(null)
@@ -323,6 +326,11 @@ export default function SongDetailPage() {
             &#9654; {tPractice('start')}
           </Button>
         </Link>
+        {hasAudio && song.chunks.length > 0 && (
+          <Button variant="outline" size="lg" onClick={() => setFullSongRecording(true)}>
+            &#127908; הקלטת שיר מלא
+          </Button>
+        )}
         <Link href={`/games/${songId}`}>
           <Button variant="secondary" size="lg">
             &#127918; {tGames('title')}
@@ -508,6 +516,24 @@ export default function SongDetailPage() {
               )?.fileUrl ?? null
               : null
           }
+        />
+      )}
+
+      {/* Full song recording modal */}
+      {fullSongRecording && (
+        <FullSongRecordingPanel
+          isOpen={fullSongRecording}
+          onClose={() => setFullSongRecording(false)}
+          songId={songId}
+          songTitle={song.title}
+          chunks={song.chunks.map((c) => ({
+            ...c,
+            lineTimestamps: c.lineTimestamps ? JSON.parse(c.lineTimestamps) : null,
+          }))}
+          voicePart={userVoicePart}
+          textDirection={song.textDirection}
+          audioTracks={song.audioTracks ?? []}
+          referenceVocals={song.referenceVocals ?? []}
         />
       )}
 
