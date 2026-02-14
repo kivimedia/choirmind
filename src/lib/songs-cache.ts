@@ -48,10 +48,9 @@ async function fetchSongs(
       audioTracks: {
         select: { id: true, voicePart: true },
       },
-      _count: {
-        select: {
-          referenceVocals: { where: { status: 'READY' } },
-        },
+      referenceVocals: {
+        where: { status: 'READY', isolatedFileUrl: { not: '' } },
+        select: { id: true },
       },
     },
     orderBy: { createdAt: 'desc' as const },
@@ -71,7 +70,7 @@ async function fetchSongs(
     hasLyrics: song.chunks.some((c) => c.lyrics?.trim()),
     allSynced: song.chunks.length > 0 && song.chunks.every((c) => c.lineTimestamps),
     hasUnsynced: song.chunks.some((c) => c.lyrics?.trim() && !c.lineTimestamps),
-    stemsCount: (song as any)._count?.referenceVocals ?? 0,
+    stemsCount: (song as any).referenceVocals?.length ?? 0,
   }))
 }
 
