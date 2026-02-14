@@ -115,16 +115,22 @@ export default function LyricsSyncTool({
       prevChunkIdRef.current = chunkId
       setTimestamps(existingTimestamps ?? [])
       setCurrentLineIndex(0)
-      setSyncState('idle')
       setError(null)
       setSaving(false)
-      // Seek the player to the new start position so it's ready
-      setTimeout(() => {
-        const player = getPlayer()
-        if (player) {
-          player.seekTo(startTimeMs / 1000)
-        }
-      }, 100)
+
+      if (startTimeMs > 0) {
+        // Auto-start syncing: the player is already playing from the previous chunk,
+        // so continue seamlessly without pausing or seeking
+        setSyncState('syncing')
+      } else {
+        setSyncState('idle')
+        setTimeout(() => {
+          const player = getPlayer()
+          if (player) {
+            player.seekTo(0)
+          }
+        }, 100)
+      }
     }
   }, [chunkId, existingTimestamps, getPlayer, startTimeMs])
 

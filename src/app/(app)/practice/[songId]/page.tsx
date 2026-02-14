@@ -568,7 +568,6 @@ export default function PracticeSessionPage() {
       {/* Audio player */}
       <div className="mb-4">
         <AudioPlayer
-          key={audioMode} // re-mount when mode changes to load new track
           audioTracks={effectiveAudioTracks}
           youtubeVideoId={audioMode === 'full_mix' ? song.youtubeVideoId : undefined}
           spotifyTrackId={audioMode === 'full_mix' ? song.spotifyTrackId : undefined}

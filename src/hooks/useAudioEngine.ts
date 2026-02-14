@@ -116,6 +116,10 @@ export function useAudioEngine(options: UseAudioEngineOptions): AudioEngineState
   const loopRef = useRef(loop)
   loopRef.current = loop
 
+  // Track change: preserve position and playing state
+  const pendingSeekMsRef = useRef<number | null>(null)
+  const wasPlayingRef = useRef(false)
+
   // Current track to play
   const activeTrack = useMemo(
     () => pickTrack(audioTracks, voicePart),
@@ -132,8 +136,17 @@ export function useAudioEngine(options: UseAudioEngineOptions): AudioEngineState
     const Howl = getHowl()
     if (!Howl) return
 
-    // Destroy previous howl
+    // Destroy previous howl — save position first for seamless track switching
     if (howlRef.current) {
+      try {
+        const pos = howlRef.current.seek()
+        if (typeof pos === 'number' && pos > 0) {
+          pendingSeekMsRef.current = pos * 1000
+        }
+        wasPlayingRef.current = howlRef.current.playing()
+      } catch {
+        // Howl may already be unloaded
+      }
       howlRef.current.unload()
       howlRef.current = null
     }
@@ -148,6 +161,18 @@ export function useAudioEngine(options: UseAudioEngineOptions): AudioEngineState
       onload: () => {
         setIsLoading(false)
         setDurationMs(howl.duration() * 1000)
+        // Resume from previous position if switching tracks mid-playback
+        if (pendingSeekMsRef.current != null) {
+          const seekPos = Math.min(pendingSeekMsRef.current, howl.duration() * 1000)
+          howl.seek(seekPos / 1000)
+          setCurrentTimeMs(seekPos)
+          onTimeUpdateRef.current?.(seekPos)
+          if (wasPlayingRef.current) {
+            howl.play()
+          }
+          pendingSeekMsRef.current = null
+          wasPlayingRef.current = false
+        }
       },
       onloaderror: () => {
         setIsLoading(false)
