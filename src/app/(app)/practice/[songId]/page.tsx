@@ -455,19 +455,18 @@ export default function PracticeSessionPage() {
 
   // -- Active practice (continuous karaoke) --
   return (
-    <div dir="rtl" className="flex flex-col min-h-[calc(100vh-12rem)] text-start">
-      {/* Top: Fade level indicator */}
-      <div className="mb-4">
+    <div dir="rtl" className="flex flex-col min-h-[calc(100dvh-8rem)] text-start">
+      {/* Top: Compact header + controls */}
+      <div className="mb-3 shrink-0">
         <FadeLevelIndicator
           level={effectiveFadeLevel}
           songTitle={song.title}
           chunkLabel={currentChunk?.label ?? ''}
         />
 
-        {/* Progress through chunks (auto-advancing indicator) */}
-        <div className="mt-3 flex items-center gap-2 text-sm text-text-muted">
-          {/* Chunk dots */}
-          <div className="flex items-center gap-1">
+        {/* Progress: chunk dots + label + end button */}
+        <div className="mt-2 flex items-center gap-2 text-sm text-text-muted">
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
             {song.chunks.map((c, i) => (
               <button
                 key={c.id}
@@ -479,7 +478,7 @@ export default function PracticeSessionPage() {
                   setCurrentChunkIndex(i)
                 }}
                 className={[
-                  'h-2.5 rounded-full transition-all duration-300',
+                  'h-2.5 shrink-0 rounded-full transition-all duration-300',
                   i === currentChunkIndex
                     ? 'w-6 bg-primary'
                     : i < currentChunkIndex
@@ -490,22 +489,20 @@ export default function PracticeSessionPage() {
               />
             ))}
           </div>
-          <span className="text-xs">
+          <span className="text-xs shrink-0">
             {currentChunk?.label}
           </span>
-
-          {/* End song button */}
           <button
             type="button"
             onClick={handleEndSong}
-            className="ms-auto text-xs text-primary hover:underline"
+            className="ms-auto shrink-0 text-xs text-primary hover:underline"
           >
             סיום ודירוג
           </button>
         </div>
 
-        {/* Controls row */}
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+        {/* Controls: all in one scrollable row on mobile */}
+        <div className="mt-2 flex items-center gap-2 text-xs overflow-x-auto no-scrollbar pb-1">
           {/* Show full lyrics toggle */}
           <button
             type="button"
@@ -514,7 +511,7 @@ export default function PracticeSessionPage() {
               setManualFadeOverride(null)
             }}
             className={[
-              'flex items-center gap-1.5 rounded-full px-3 py-1 transition-colors border',
+              'flex items-center gap-1 rounded-full px-2.5 py-1.5 transition-colors border shrink-0',
               showFullLyrics && manualFadeOverride === null
                 ? 'bg-primary/15 border-primary text-primary'
                 : 'bg-surface border-border text-text-muted hover:border-primary/50',
@@ -523,11 +520,11 @@ export default function PracticeSessionPage() {
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={showFullLyrics ? 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z' : 'M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l18 18'} />
             </svg>
-            {showFullLyrics ? 'מילים מלאות' : 'הצג הכל'}
+            <span className="hidden sm:inline">{showFullLyrics ? 'מילים מלאות' : 'הצג הכל'}</span>
           </button>
 
-          {/* Manual fade level selector */}
-          <div className="flex items-center gap-1 rounded-full border border-border bg-surface px-1.5 py-1">
+          {/* Fade level selector */}
+          <div className="flex items-center gap-0.5 rounded-full border border-border bg-surface px-1 py-0.5 shrink-0">
             {[0, 1, 2, 3, 4, 5].map((level) => {
               const isActive = effectiveFadeLevel === level
               return (
@@ -539,7 +536,7 @@ export default function PracticeSessionPage() {
                     setShowFullLyrics(false)
                   }}
                   className={[
-                    'rounded-full px-2.5 py-1 transition-colors text-xs font-medium min-w-[32px] min-h-[32px] flex items-center justify-center',
+                    'rounded-full transition-colors text-xs font-medium min-w-[28px] min-h-[28px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center',
                     isActive
                       ? 'bg-primary text-white'
                       : 'text-text-muted hover:bg-surface-hover',
@@ -551,22 +548,21 @@ export default function PracticeSessionPage() {
               )
             })}
           </div>
-        </div>
 
-        {/* Audio mode selector */}
-        {(audioModeAvailable.vocalsOnly || audioModeAvailable.musicOnly) && (
-          <div className="mt-2">
+          {/* Audio mode selector (inline) */}
+          {(audioModeAvailable.vocalsOnly || audioModeAvailable.musicOnly) && (
             <AudioModeSelector
               available={audioModeAvailable}
               selected={audioMode}
               onChange={setAudioMode}
+              className="shrink-0"
             />
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Audio player */}
-      <div className="mb-4">
+      <div className="mb-3 shrink-0">
         <AudioPlayer
           audioTracks={effectiveAudioTracks}
           youtubeVideoId={audioMode === 'full_mix' ? song.youtubeVideoId : undefined}
@@ -577,8 +573,8 @@ export default function PracticeSessionPage() {
         />
       </div>
 
-      {/* Middle: Lyrics display with chunk transition */}
-      <div className="flex-1 rounded-xl border border-border bg-surface p-4 sm:p-6 mb-6 overflow-y-auto practice-scroll relative">
+      {/* Lyrics display — fills remaining space */}
+      <div className="flex-1 min-h-0 rounded-xl border border-border bg-surface p-3 sm:p-6 mb-4 overflow-y-auto practice-scroll relative">
         {currentChunk && (
           <div
             key={currentChunk.id}

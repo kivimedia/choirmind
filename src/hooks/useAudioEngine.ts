@@ -136,21 +136,6 @@ export function useAudioEngine(options: UseAudioEngineOptions): AudioEngineState
     const Howl = getHowl()
     if (!Howl) return
 
-    // Destroy previous howl — save position first for seamless track switching
-    if (howlRef.current) {
-      try {
-        const pos = howlRef.current.seek()
-        if (typeof pos === 'number' && pos > 0) {
-          pendingSeekMsRef.current = pos * 1000
-        }
-        wasPlayingRef.current = howlRef.current.playing()
-      } catch {
-        // Howl may already be unloaded
-      }
-      howlRef.current.unload()
-      howlRef.current = null
-    }
-
     setIsLoading(true)
 
     const howl = new Howl({
@@ -195,6 +180,17 @@ export function useAudioEngine(options: UseAudioEngineOptions): AudioEngineState
     howlRef.current = howl
 
     return () => {
+      // Save position before unloading — cleanup runs before next effect,
+      // so this preserves position for seamless track switching
+      try {
+        const pos = howl.seek()
+        if (typeof pos === 'number' && pos > 0) {
+          pendingSeekMsRef.current = pos * 1000
+        }
+        wasPlayingRef.current = howl.playing()
+      } catch {
+        // Howl may already be unloaded
+      }
       howl.unload()
       howlRef.current = null
       setIsPlaying(false)
