@@ -192,9 +192,9 @@ export async function POST(request: NextRequest) {
     // Trigger the Python vocal analysis service
     const vocalServiceUrl = process.env.VOCAL_SERVICE_URL
     if (vocalServiceUrl) {
-      // Fire-and-forget with 15s timeout: if service doesn't respond, fall back to mock
+      // Fire-and-forget with 120s timeout: Demucs on GPU takes 30-60s
       const abortCtrl = new AbortController()
-      const timeout = setTimeout(() => abortCtrl.abort(), 15_000)
+      const timeout = setTimeout(() => abortCtrl.abort(), 120_000)
       fetch(`${vocalServiceUrl}/api/v1/process-vocal-analysis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -211,16 +211,23 @@ export async function POST(request: NextRequest) {
       }).then(async (res) => {
         clearTimeout(timeout)
         if (!res.ok) {
-          console.error('[vocal-analysis/jobs] Service error, falling back to mock:', res.status)
-          await generateMockResults(job.id, userId, songId, voicePart, recordingS3Key, recordingDurationMs)
-            .catch((e) => console.error('[vocal-analysis/jobs] Mock fallback failed:', e))
+          const detail = await res.text().catch(() => '')
+          const errMsg = `Vocal service error ${res.status}: ${detail}`.slice(0, 500)
+          console.error('[vocal-analysis/jobs] Service error:', errMsg)
+          await prisma.vocalAnalysisJob.update({
+            where: { id: job.id },
+            data: { status: 'FAILED', errorMessage: errMsg, completedAt: new Date() },
+          }).catch((e) => console.error('[vocal-analysis/jobs] Failed to update job status:', e))
         }
         // If res.ok, the service is handling it — it will update the DB directly
       }).catch(async (err) => {
         clearTimeout(timeout)
-        console.error('[vocal-analysis/jobs] Service failed/timeout, falling back to mock:', err?.message)
-        await generateMockResults(job.id, userId, songId, voicePart, recordingS3Key, recordingDurationMs)
-          .catch((e) => console.error('[vocal-analysis/jobs] Mock fallback failed:', e))
+        const errMsg = `Vocal service unavailable: ${err?.message ?? 'unknown error'}`.slice(0, 500)
+        console.error('[vocal-analysis/jobs] Service failed/timeout:', errMsg)
+        await prisma.vocalAnalysisJob.update({
+          where: { id: job.id },
+          data: { status: 'FAILED', errorMessage: errMsg, completedAt: new Date() },
+        }).catch((e) => console.error('[vocal-analysis/jobs] Failed to update job status:', e))
       })
     } else {
       // No vocal service configured — generate mock results immediately

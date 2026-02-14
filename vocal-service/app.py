@@ -48,10 +48,17 @@ image = (
         "fastdtw",
         "scipy",
         "torch",
+        "torchaudio",
+        "torchcodec",
+        "soundfile",
         "psycopg2-binary",
         "pydantic",
         "demucs",
     )
+    .env({"TORCHAUDIO_BACKEND": "soundfile"})
+    .add_local_file("processing.py", "/root/processing.py")
+    .add_local_file("scoring.py", "/root/scoring.py")
+    .add_local_file("coaching.py", "/root/coaching.py")
 )
 
 app = modal.App(
@@ -116,11 +123,10 @@ def _update_job_status(
                     UPDATE "VocalAnalysisJob"
                     SET status = %s,
                         "startedAt" = %s,
-                        attempts = attempts + 1,
-                        "updatedAt" = %s
+                        attempts = attempts + 1
                     WHERE id = %s
                     """,
-                    (status, now, now, job_id),
+                    (status, now, job_id),
                 )
             elif status == "COMPLETED":
                 cur.execute(
@@ -128,11 +134,10 @@ def _update_job_status(
                     UPDATE "VocalAnalysisJob"
                     SET status = %s,
                         "completedAt" = %s,
-                        "practiceSessionId" = %s,
-                        "updatedAt" = %s
+                        "practiceSessionId" = %s
                     WHERE id = %s
                     """,
-                    (status, now, practice_session_id, now, job_id),
+                    (status, now, practice_session_id, job_id),
                 )
             elif status == "FAILED":
                 cur.execute(
@@ -140,11 +145,10 @@ def _update_job_status(
                     UPDATE "VocalAnalysisJob"
                     SET status = %s,
                         "completedAt" = %s,
-                        "errorMessage" = %s,
-                        "updatedAt" = %s
+                        "errorMessage" = %s
                     WHERE id = %s
                     """,
-                    (status, now, error_message, now, job_id),
+                    (status, now, error_message, job_id),
                 )
         conn.commit()
     finally:
@@ -973,7 +977,8 @@ async def prepare_reference(req: PrepareReferenceRequest):
 # ---------------------------------------------------------------------------
 
 
-@app.function(timeout=900, allow_concurrent_inputs=10)
+@app.function(timeout=900)
+@modal.concurrent(max_inputs=10)
 @modal.asgi_app()
 def fastapi_app():
     """Mount the FastAPI application as a Modal web endpoint."""

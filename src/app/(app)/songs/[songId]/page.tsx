@@ -32,6 +32,13 @@ interface AudioTrack {
   fileUrl: string
 }
 
+interface ReferenceVocal {
+  id: string
+  voicePart: string
+  isolatedFileUrl: string
+  durationMs: number
+}
+
 interface Song {
   id: string
   title: string
@@ -42,6 +49,7 @@ interface Song {
   textDirection: string
   chunks: Chunk[]
   audioTracks?: AudioTrack[]
+  referenceVocals?: ReferenceVocal[]
   source?: string | null
   readiness?: number
   isPersonal: boolean
@@ -360,6 +368,11 @@ export default function SongDetailPage() {
         </div>
       )}
 
+      {/* Isolated vocal stems (from Demucs) */}
+      {song.referenceVocals && song.referenceVocals.length > 0 && (
+        <IsolatedVocalsSection vocals={song.referenceVocals} />
+      )}
+
       {/* Overall readiness */}
       {typeof song.readiness === 'number' && (
         <Card>
@@ -526,6 +539,71 @@ export default function SongDetailPage() {
           </div>
         </div>
       </Modal>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Isolated Vocals Section
+// ---------------------------------------------------------------------------
+
+const PART_LABELS: Record<string, string> = {
+  soprano: 'סופרן',
+  mezzo: 'מצו',
+  alto: 'אלט',
+  tenor: 'טנור',
+  baritone: 'בריטון',
+  bass: 'בס',
+}
+
+const PART_ORDER = ['soprano', 'mezzo', 'alto', 'tenor', 'baritone', 'bass']
+
+function IsolatedVocalsSection({ vocals }: { vocals: ReferenceVocal[] }) {
+  const [open, setOpen] = useState(false)
+  const sorted = [...vocals].sort(
+    (a, b) => PART_ORDER.indexOf(a.voicePart) - PART_ORDER.indexOf(b.voicePart),
+  )
+
+  return (
+    <div className="rounded-xl border border-border bg-surface">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover rounded-xl"
+      >
+        <span className="flex items-center gap-2">
+          <svg className="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+          </svg>
+          שירה מבודדת ({sorted.length})
+        </span>
+        <svg
+          className={`h-4 w-4 text-text-muted transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="space-y-2 px-4 pb-4">
+          {sorted.map((v) => (
+            <div key={v.id} className="flex items-center gap-3">
+              <span className="w-14 shrink-0 text-xs font-medium text-text-muted">
+                {PART_LABELS[v.voicePart] ?? v.voicePart}
+              </span>
+              <audio
+                controls
+                preload="none"
+                src={v.isolatedFileUrl}
+                className="h-8 w-full min-w-0"
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

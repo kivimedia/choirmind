@@ -62,13 +62,33 @@ def isolate_vocals(
         pass
 
     # The output tree is: <output_dir>/<model>/<track_name>/vocals.wav
+    # but may vary by Demucs version — search for the vocals file
     track_name = Path(audio_path).stem
     vocal_path = os.path.join(output_dir, model, track_name, "vocals.wav")
 
     if not os.path.isfile(vocal_path):
-        raise FileNotFoundError(
-            f"Demucs did not produce expected vocal file at {vocal_path}"
-        )
+        # Search for any vocals file in the output directory
+        logger.warning("Expected vocal file not at %s, searching...", vocal_path)
+        found = None
+        for root, dirs, files in os.walk(output_dir):
+            for f in files:
+                if "vocal" in f.lower():
+                    found = os.path.join(root, f)
+                    break
+            if found:
+                break
+        if found:
+            vocal_path = found
+            logger.info("Found vocal file at: %s", vocal_path)
+        else:
+            # List what was actually produced for debugging
+            all_files = []
+            for root, dirs, files in os.walk(output_dir):
+                for f in files:
+                    all_files.append(os.path.join(root, f))
+            raise FileNotFoundError(
+                f"Demucs did not produce vocal file. Output dir contents: {all_files}"
+            )
 
     logger.info("Vocal isolation complete: %s", vocal_path)
     return vocal_path

@@ -65,6 +65,44 @@ export async function POST(
     })
 
     invalidateSongsCache()
+
+    // Auto-trigger reference vocal creation (Demucs isolation + feature extraction)
+    // so it's ready before any user tries to record against this track.
+    const vocalServiceUrl = process.env.VOCAL_SERVICE_URL
+    if (vocalServiceUrl) {
+      // Create a PENDING ReferenceVocal record
+      const reference = await prisma.referenceVocal.create({
+        data: {
+          songId,
+          voicePart,
+          sourceTrackId: audioTrack.id,
+          featuresFileUrl: '',
+          durationMs: durationMs ? Math.round(durationMs) : 0,
+          status: 'PENDING',
+        },
+      }).catch((e) => {
+        console.error('[confirm] Failed to create ReferenceVocal record:', e)
+        return null
+      })
+
+      if (reference) {
+        // Fire-and-forget: trigger the vocal service
+        fetch(`${vocalServiceUrl}/api/v1/prepare-reference`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            referenceVocalId: reference.id,
+            songId,
+            voicePart,
+            sourceTrackId: audioTrack.id,
+            audioFileUrl: fileUrl,
+          }),
+        }).catch((err) => {
+          console.error('[confirm] Failed to trigger reference vocal creation:', err)
+        })
+      }
+    }
+
     return NextResponse.json({ audioTrack })
   } catch (error) {
     console.error('[confirm POST]', error)

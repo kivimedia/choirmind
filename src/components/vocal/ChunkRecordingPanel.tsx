@@ -159,19 +159,56 @@ export default function ChunkRecordingPanel({
   hasAudio,
   backingTrackUrl,
 }: ChunkRecordingPanelProps) {
-  const recorder = useVocalRecorder()
   const [step, setStep] = useState<Step>('ready')
   const [withBacking, setWithBacking] = useState(true)
+
+  // Pre-fetch backing track as ArrayBuffer for Web Audio API playback
+  const [backingBuffer, setBackingBuffer] = useState<ArrayBuffer | null>(null)
+  const [backingLoading, setBackingLoading] = useState(false)
+  useEffect(() => {
+    if (!isOpen || !backingTrackUrl || !withBacking) {
+      setBackingBuffer(null)
+      setBackingLoading(false)
+      return
+    }
+    setBackingLoading(true)
+    fetch(backingTrackUrl)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.arrayBuffer()
+      })
+      .then(buf => {
+        setBackingBuffer(buf)
+        setBackingLoading(false)
+      })
+      .catch((err) => {
+        console.warn('[ChunkRecording] Failed to fetch backing track:', err)
+        setBackingBuffer(null)
+        setBackingLoading(false)
+      })
+  }, [isOpen, backingTrackUrl, withBacking])
+
+  const recorder = useVocalRecorder(
+    withBacking && hasAudio ? { backingTrackBuffer: backingBuffer } : undefined
+  )
+
+  // Keep recording blob URL for playback in results
+  const [recordingBlobUrl, setRecordingBlobUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (recorder.audioBlob) {
+      const url = URL.createObjectURL(recorder.audioBlob)
+      setRecordingBlobUrl(url)
+      return () => URL.revokeObjectURL(url)
+    }
+    setRecordingBlobUrl(null)
+  }, [recorder.audioBlob])
 
   // withBacking defaults to true — user can toggle manually
   const [jobId, setJobId] = useState<string | null>(null)
   const [result, setResult] = useState<SessionResult | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [backingPlaying, setBackingPlaying] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
-  // DOM-attached <audio> element ref for backing track
-  const backingRef = useRef<HTMLAudioElement | null>(null)
 
   // Reset when modal closes
   useEffect(() => {
@@ -180,6 +217,7 @@ export default function ChunkRecordingPanel({
       setJobId(null)
       setResult(null)
       setErrorMsg(null)
+      setRecordingBlobUrl(null)
       recorder.reset()
       if (pollRef.current) clearInterval(pollRef.current)
       if (abortRef.current) abortRef.current.abort()
@@ -187,39 +225,23 @@ export default function ChunkRecordingPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
 
-  // Start recording — optionally play backing track
+  // Start recording — backing track is played through the same AudioContext by the hook
   const handleStartRecording = useCallback(async () => {
     setErrorMsg(null)
-
-    // Play backing track BEFORE getUserMedia to stay in user-gesture context.
-    // Do NOT await — fire-and-forget so we don't lose the gesture.
-    if (withBacking && backingRef.current) {
-      backingRef.current.currentTime = 0
-      backingRef.current.play()
-        .then(() => setBackingPlaying(true))
-        .catch((err: unknown) => {
-          console.warn('[ChunkRecording] Backing track play failed:', err)
-          setErrorMsg('לא ניתן להפעיל מוזיקה ברקע')
-          setBackingPlaying(false)
-        })
-    }
 
     try {
       await recorder.startRecording()
     } catch {
-      // Recording failed — stop backing track if it started
-      if (backingRef.current) backingRef.current.pause()
       setErrorMsg('לא ניתן להפעיל מיקרופון')
       return
     }
 
     setStep('recording')
-  }, [recorder, withBacking])
+  }, [recorder])
 
-  // Stop recording — pause backing track
+  // Stop recording — backing track is stopped by the hook
   const handleStopRecording = useCallback(() => {
     recorder.stopRecording()
-    if (backingRef.current) backingRef.current.pause()
     audioActions?.pause()
   }, [recorder, audioActions])
 
@@ -344,17 +366,6 @@ export default function ChunkRecordingPanel({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`${chunk.label}`} resizable>
-      {/* Hidden audio element for backing track — DOM-attached for reliable playback */}
-      {hasAudio && backingTrackUrl && (
-        <audio
-          ref={backingRef}
-          src={backingTrackUrl}
-          preload="auto"
-          onPause={() => setBackingPlaying(false)}
-          onEnded={() => setBackingPlaying(false)}
-          style={{ display: 'none' }}
-        />
-      )}
       <div className="space-y-4">
         {/* Chunk lyrics */}
         <div
@@ -405,8 +416,11 @@ export default function ChunkRecordingPanel({
               size="lg"
               className="w-full"
               onClick={handleStartRecording}
+              disabled={withBacking && hasAudio && backingLoading}
             >
-              {'התחילו הקלטה'}
+              {withBacking && hasAudio && backingLoading
+                ? 'טוען מוזיקת רקע...'
+                : 'התחילו הקלטה'}
             </Button>
           </div>
         )}
@@ -421,8 +435,12 @@ export default function ChunkRecordingPanel({
             </p>
 
             {withBacking && hasAudio && (
-              <p className={`text-xs ${backingPlaying ? 'text-secondary' : 'text-text-muted'}`}>
-                {backingPlaying ? '♫ מוזיקה מנגנת ברקע' : 'מוזיקה ברקע — טוען...'}
+              <p className={`text-xs ${recorder.backingPlaying ? 'text-secondary' : 'text-text-muted'}`}>
+                {recorder.backingPlaying
+                  ? '♫ מוזיקה מנגנת ברקע'
+                  : backingBuffer
+                    ? 'מוזיקת רקע — לא הצליחה להתנגן'
+                    : 'מוזיקת רקע — לא נטענה'}
               </p>
             )}
 
@@ -551,15 +569,31 @@ export default function ChunkRecordingPanel({
               </div>
             )}
 
-            {result.isolatedVocalUrl && (
+            {(result.isolatedVocalUrl || recordingBlobUrl) && (
               <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-foreground">{'הקול המבודד שלך'}</h3>
-                <audio
-                  controls
-                  src={result.isolatedVocalUrl}
-                  className="w-full h-10"
-                  preload="none"
-                />
+                <h3 className="text-sm font-semibold text-foreground">{'השוואת ביצוע'}</h3>
+                {result.isolatedVocalUrl && (
+                  <div>
+                    <p className="text-xs text-text-muted mb-1">{'קול ייחוס (מבודד מהשיר)'}</p>
+                    <audio
+                      controls
+                      src={result.isolatedVocalUrl}
+                      className="w-full h-10"
+                      preload="none"
+                    />
+                  </div>
+                )}
+                {recordingBlobUrl && (
+                  <div>
+                    <p className="text-xs text-text-muted mb-1">{'ההקלטה שלך'}</p>
+                    <audio
+                      controls
+                      src={recordingBlobUrl}
+                      className="w-full h-10"
+                      preload="none"
+                    />
+                  </div>
+                )}
               </div>
             )}
 

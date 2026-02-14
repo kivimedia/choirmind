@@ -24,6 +24,15 @@ export async function GET(
           orderBy: { order: 'asc' },
         },
         audioTracks: true,
+        referenceVocals: {
+          where: { status: 'READY', isolatedFileUrl: { not: '' } },
+          select: {
+            id: true,
+            voicePart: true,
+            isolatedFileUrl: true,
+            durationMs: true,
+          },
+        },
       },
     })
 

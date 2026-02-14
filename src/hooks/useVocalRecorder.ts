@@ -9,6 +9,7 @@ export interface VocalRecorderState {
   analyserData: Uint8Array | null
   audioBlob: Blob | null
   error: string | null
+  backingPlaying: boolean
 }
 
 export interface VocalRecorderActions {
@@ -19,17 +20,23 @@ export interface VocalRecorderActions {
   reset: () => void
 }
 
-export function useVocalRecorder(): VocalRecorderState & VocalRecorderActions {
+export interface UseVocalRecorderOptions {
+  backingTrackBuffer?: ArrayBuffer | null
+}
+
+export function useVocalRecorder(options?: UseVocalRecorderOptions): VocalRecorderState & VocalRecorderActions {
   const [isRecording, setIsRecording] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [durationMs, setDurationMs] = useState(0)
   const [analyserData, setAnalyserData] = useState<Uint8Array | null>(null)
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [backingPlaying, setBackingPlaying] = useState(false)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
+  const backingSourceRef = useRef<AudioBufferSourceNode | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const startTimeRef = useRef<number>(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -40,6 +47,8 @@ export function useVocalRecorder(): VocalRecorderState & VocalRecorderActions {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
+      try { backingSourceRef.current?.stop() } catch {}
+      backingSourceRef.current = null
       if (audioContextRef.current?.state !== 'closed') {
         audioContextRef.current?.close()
       }
@@ -70,12 +79,38 @@ export function useVocalRecorder(): VocalRecorderState & VocalRecorderActions {
 
       // Set up AudioContext + AnalyserNode for waveform
       const audioContext = new AudioContext()
+      // Resume AudioContext — required on iOS/mobile where it starts suspended
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume()
+      }
       const source = audioContext.createMediaStreamSource(stream)
       const analyser = audioContext.createAnalyser()
       analyser.fftSize = 256
       source.connect(analyser)
       audioContextRef.current = audioContext
       analyserRef.current = analyser
+
+      // Play backing track through the SAME AudioContext to avoid iOS audio session conflict
+      if (options?.backingTrackBuffer) {
+        try {
+          // Copy the buffer since decodeAudioData detaches it
+          const bufferCopy = options.backingTrackBuffer.slice(0)
+          const audioBuffer = await audioContext.decodeAudioData(bufferCopy)
+          const backingSource = audioContext.createBufferSource()
+          backingSource.buffer = audioBuffer
+          backingSource.connect(audioContext.destination)
+          backingSource.onended = () => {
+            setBackingPlaying(false)
+            backingSourceRef.current = null
+          }
+          backingSource.start(0)
+          backingSourceRef.current = backingSource
+          setBackingPlaying(true)
+        } catch (err) {
+          console.warn('[useVocalRecorder] Failed to play backing track:', err)
+          setBackingPlaying(false)
+        }
+      }
 
       // Determine best supported MIME type
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -96,6 +131,10 @@ export function useVocalRecorder(): VocalRecorderState & VocalRecorderActions {
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: mimeType })
         setAudioBlob(blob)
+        // Stop backing track
+        try { backingSourceRef.current?.stop() } catch {}
+        backingSourceRef.current = null
+        setBackingPlaying(false)
         // Stop all tracks
         stream.getTracks().forEach((t) => t.stop())
         if (audioContextRef.current?.state !== 'closed') {
@@ -123,9 +162,14 @@ export function useVocalRecorder(): VocalRecorderState & VocalRecorderActions {
           : 'שגיאה בהפעלת ההקלטה'
       setError(message)
     }
-  }, [updateAnalyser])
+  }, [updateAnalyser, options?.backingTrackBuffer])
 
   const stopRecording = useCallback(() => {
+    // Stop backing track
+    try { backingSourceRef.current?.stop() } catch {}
+    backingSourceRef.current = null
+    setBackingPlaying(false)
+
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop()
     }
@@ -166,6 +210,7 @@ export function useVocalRecorder(): VocalRecorderState & VocalRecorderActions {
     analyserData,
     audioBlob,
     error,
+    backingPlaying,
     startRecording,
     stopRecording,
     pauseRecording,
