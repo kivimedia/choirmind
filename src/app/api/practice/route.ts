@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
     if (filterChoirId) {
       songWhere.OR = [
         { choirId: filterChoirId },
-        { isPersonal: true, createdById: userId },
+        { isPersonal: true, personalUserId: userId },
       ]
     } else {
       // All songs in user's choirs + personal
@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
       const choirIds = memberships.map((m) => m.choirId)
       songWhere.OR = [
         { choirId: { in: choirIds } },
-        { isPersonal: true, createdById: userId },
+        { isPersonal: true, personalUserId: userId },
       ]
     }
 
