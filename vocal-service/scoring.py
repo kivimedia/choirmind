@@ -67,8 +67,8 @@ def score_recording(
         + dynamics_score * WEIGHT_DYNAMICS
     )
 
-    section_scores = _compute_section_scores(alignment, ref_features)
-    problem_areas = _identify_problem_areas(alignment, ref_features)
+    section_scores = _compute_section_scores(alignment, user_features)
+    problem_areas = _identify_problem_areas(alignment, user_features)
 
     result = {
         "overallScore": round(overall, 1),
@@ -154,14 +154,14 @@ def _score_dynamics(alignment: dict) -> float:
 # Section scores
 # ---------------------------------------------------------------------------
 
-def _compute_section_scores(alignment: dict, ref_features: dict) -> list[dict]:
-    """Split the reference timeline into NUM_SECTIONS equal segments
+def _compute_section_scores(alignment: dict, user_features: dict) -> list[dict]:
+    """Split the user recording timeline into NUM_SECTIONS equal segments
     and compute sub-scores for each."""
-    ref_times = ref_features.get("pitch_times", [])
-    if not ref_times:
+    user_times = user_features.get("pitch_times", [])
+    if not user_times:
         return []
 
-    duration = ref_times[-1]
+    duration = user_times[-1]
     section_dur = duration / NUM_SECTIONS
     path = alignment["path"]
 
@@ -176,9 +176,9 @@ def _compute_section_scores(alignment: dict, ref_features: dict) -> list[dict]:
         sec_energy_rats = []
 
         for pair_idx, (u_idx, r_idx) in enumerate(path):
-            if r_idx >= len(ref_times):
+            if u_idx >= len(user_times):
                 continue
-            t = ref_times[r_idx]
+            t = user_times[u_idx]
             if t < t_start or t >= t_end:
                 continue
 
@@ -223,19 +223,19 @@ def _compute_section_scores(alignment: dict, ref_features: dict) -> list[dict]:
 
 def _identify_problem_areas(
     alignment: dict,
-    ref_features: dict,
+    user_features: dict,
     window_s: float = 2.0,
 ) -> list[dict]:
     """Identify up to 3 worst time windows in the recording.
 
-    Slides a *window_s*-second window across the reference timeline
+    Slides a *window_s*-second window across the user recording timeline
     and finds the windows with the lowest combined scores.
     """
-    ref_times = ref_features.get("pitch_times", [])
-    if not ref_times:
+    user_times = user_features.get("pitch_times", [])
+    if not user_times:
         return []
 
-    duration = ref_times[-1]
+    duration = user_times[-1]
     step = window_s / 2  # 50 % overlap
     path = alignment["path"]
 
@@ -250,10 +250,10 @@ def _identify_problem_areas(
         w_dynamics = []
 
         for pair_idx, (u_idx, r_idx) in enumerate(path):
-            if r_idx >= len(ref_times):
+            if u_idx >= len(user_times):
                 continue
-            rt = ref_times[r_idx]
-            if rt < t_start or rt >= t_end:
+            ut = user_times[u_idx]
+            if ut < t_start or ut >= t_end:
                 continue
 
             dev = alignment["pitch_deviations"][pair_idx]
