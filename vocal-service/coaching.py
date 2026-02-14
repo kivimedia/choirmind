@@ -46,14 +46,19 @@ def generate_coaching_tips(
 
     client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
 
-    response = client.messages.create(
-        model="claude-haiku-4-20250414",
-        max_tokens=1024,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
-    )
-
-    raw_text = response.content[0].text.strip()
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        raw_text = response.content[0].text.strip()
+    except Exception as exc:
+        # Convert Anthropic SDK exceptions to plain exceptions
+        # so Modal can serialize them across containers
+        logger.error("Anthropic API error: %s", exc)
+        raise RuntimeError(f"Anthropic API error: {exc}") from None
 
     # Parse the JSON array
     try:

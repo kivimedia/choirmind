@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 import traceback
 import uuid
 from datetime import datetime, timezone
@@ -686,18 +687,36 @@ def run_scoring_and_coaching(
     song_title: Optional[str] = None,
 ) -> dict:
     """Align, score, and generate coaching tips. Returns combined results."""
+    import time as _time
     from processing import align_features
     from scoring import score_recording
     from coaching import generate_coaching_tips
 
+    t0 = _time.time()
     alignment = align_features(user_features, ref_features)
+    logger.info("[PROFILE] align: %.1fs", _time.time() - t0)
+
+    t1 = _time.time()
     scores = score_recording(user_features, ref_features, alignment)
-    coaching_tips = generate_coaching_tips(
-        scores=scores,
-        problem_areas=scores.get("problemAreas", []),
-        voice_part=voice_part,
-        song_title=song_title,
-    )
+    logger.info("[PROFILE] score: %.1fs", _time.time() - t1)
+
+    t1 = _time.time()
+    try:
+        coaching_tips = generate_coaching_tips(
+            scores=scores,
+            problem_areas=scores.get("problemAreas", []),
+            voice_part=voice_part,
+            song_title=song_title,
+        )
+    except Exception as exc:
+        # Fallback: don't let coaching failure kill the whole pipeline
+        logger.error("Coaching tips failed: %s — using defaults", exc)
+        coaching_tips = [
+            "נסה לשמור על יציבות בגובה הצליל לאורך כל הביצוע.",
+            "שים לב לתזמון: הקפד להיכנס יחד עם ההפניה.",
+            "עבוד על דינמיקה: תנודות בעוצמה חשובות להבעה מוזיקלית.",
+        ]
+    logger.info("[PROFILE] coaching: %.1fs", _time.time() - t1)
 
     return {
         "scores": scores,
@@ -716,12 +735,20 @@ def run_standalone_scoring_and_coaching(
     from coaching import generate_coaching_tips
 
     scores = score_standalone(user_features)
-    coaching_tips = generate_coaching_tips(
-        scores=scores,
-        problem_areas=scores.get("problemAreas", []),
-        voice_part=voice_part,
-        song_title=song_title,
-    )
+    try:
+        coaching_tips = generate_coaching_tips(
+            scores=scores,
+            problem_areas=scores.get("problemAreas", []),
+            voice_part=voice_part,
+            song_title=song_title,
+        )
+    except Exception as exc:
+        logger.error("Coaching tips failed: %s — using defaults", exc)
+        coaching_tips = [
+            "נסה לשמור על יציבות בגובה הצליל לאורך כל הביצוע.",
+            "שים לב לתזמון: הקפד להיכנס יחד עם ההפניה.",
+            "עבוד על דינמיקה: תנודות בעוצמה חשובות להבעה מוזיקלית.",
+        ]
     return {"scores": scores, "coachingTips": coaching_tips}
 
 
@@ -767,6 +794,9 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
     )
 
     try:
+        t0 = time.time()
+        timings: dict[str, float] = {}
+
         # 1. Mark job as PROCESSING
         _update_job_status(req.jobId, "PROCESSING")
         _update_job_stage(req.jobId, "downloading")
@@ -779,8 +809,11 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
         with open(recording_path, "rb") as f:
             recording_bytes = f.read()
         os.unlink(recording_path)
+        timings["download"] = time.time() - t0
+        logger.info("[PROFILE] download: %.1fs (%.1fMB)", timings["download"], len(recording_bytes) / 1e6)
 
         # 3. Vocal isolation if needed
+        t1 = time.time()
         _update_job_stage(req.jobId, "isolating")
         if not req.useHeadphones:
             logger.info("Running Demucs vocal isolation (no headphones)")
@@ -791,8 +824,11 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
         else:
             logger.info("Headphones used -- skipping vocal isolation")
             vocal_bytes = recording_bytes
+        timings["isolate"] = time.time() - t1
+        logger.info("[PROFILE] isolate: %.1fs", timings["isolate"])
 
         # 3b. Upload isolated vocal to S3 for frontend playback
+        t1 = time.time()
         isolated_s3_key = (
             f"vocal-recordings/{req.userId}/{req.songId}/"
             f"{req.jobId}_isolated.wav"
@@ -808,13 +844,18 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
             )
         finally:
             os.unlink(tmp_vocal_path)
-        logger.info("Uploaded isolated vocal: %s", isolated_s3_key)
+        timings["upload_isolated"] = time.time() - t1
+        logger.info("[PROFILE] upload_isolated: %.1fs", timings["upload_isolated"])
 
         # 4. Extract user features
+        t1 = time.time()
         _update_job_stage(req.jobId, "extracting")
         user_features = run_feature_extraction.remote(vocal_bytes, "vocal.wav")
+        timings["extract"] = time.time() - t1
+        logger.info("[PROFILE] extract_features: %.1fs", timings["extract"])
 
         # 5. Load reference features (or auto-create)
+        t1 = time.time()
         _update_job_stage(req.jobId, "loading_reference")
         ref_features = None
         reference_vocal_id = req.referenceVocalId
@@ -838,8 +879,11 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
             if ref_result:
                 ref_features = ref_result["features"]
                 reference_vocal_id = ref_result["referenceVocalId"]
+        timings["load_ref"] = time.time() - t1
+        logger.info("[PROFILE] load_reference: %.1fs (found=%s)", timings["load_ref"], ref_features is not None)
 
         # 6 + 7. Score and generate coaching tips
+        t1 = time.time()
         _update_job_stage(req.jobId, "scoring")
         song_title = _get_song_title(req.songId)
 
@@ -857,8 +901,11 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
 
         scores = result["scores"]
         coaching_tips = result["coachingTips"]
+        timings["score_coach"] = time.time() - t1
+        logger.info("[PROFILE] score+coaching: %.1fs", timings["score_coach"])
 
         # 8. Compute XP and create VocalPracticeSession
+        t1 = time.time()
         _update_job_stage(req.jobId, "saving")
         xp_earned = _compute_xp(scores["overallScore"])
 
@@ -874,18 +921,22 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
             xp_earned=xp_earned,
             isolated_vocal_url=isolated_vocal_url,
         )
+        timings["save"] = time.time() - t1
 
         # XP awarding is handled by the Next.js side when polling detects COMPLETED
 
         # 9. Update job to COMPLETED
         _update_job_status(req.jobId, "COMPLETED", practice_session_id=session_id)
 
+        total_time = time.time() - t0
         logger.info(
-            "Job %s completed: session=%s score=%.1f xp=%d",
-            req.jobId,
-            session_id,
-            scores["overallScore"],
-            xp_earned,
+            "[PROFILE] Job %s TOTAL: %.1fs | download=%.1f isolate=%.1f upload=%.1f extract=%.1f ref=%.1f score=%.1f save=%.1f | score=%.1f xp=%d",
+            req.jobId, total_time,
+            timings.get("download", 0), timings.get("isolate", 0),
+            timings.get("upload_isolated", 0), timings.get("extract", 0),
+            timings.get("load_ref", 0), timings.get("score_coach", 0),
+            timings.get("save", 0),
+            scores["overallScore"], xp_earned,
         )
 
         return {
@@ -899,6 +950,7 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
             "coachingTips": coaching_tips,
             "xpEarned": xp_earned,
             "isolatedVocalUrl": isolated_vocal_url,
+            "timings": timings,
         }
 
     except Exception as exc:
