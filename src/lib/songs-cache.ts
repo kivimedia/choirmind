@@ -56,6 +56,8 @@ async function fetchSongs(
     orderBy: { createdAt: 'desc' as const },
   })
 
+  console.log('[songs-cache] fetched', songs.length, 'songs, referenceVocals sample:', songs.slice(0, 3).map(s => ({ id: s.id, title: s.title, rvCount: (s as any).referenceVocals?.length })))
+
   return songs.map((song) => ({
     id: song.id,
     title: song.title,
