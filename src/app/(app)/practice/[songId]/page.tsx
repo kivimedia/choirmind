@@ -376,10 +376,10 @@ export default function PracticeSessionPage() {
         e.preventDefault()
         const a = audioActionsRef.current
         if (a) a.isPlaying ? a.pause() : a.play()
-      } else if (e.key === 'ArrowRight') {
+      } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
         setManualSeekMs(Math.max(0, currentTimeMs - 3000))
-      } else if (e.key === 'ArrowLeft') {
+      } else if (e.key === 'ArrowRight') {
         e.preventDefault()
         setManualSeekMs(currentTimeMs + 3000)
       }
