@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 
 interface MicSelectorProps {
   selectedDeviceId: string | null
@@ -10,6 +10,13 @@ interface MicSelectorProps {
 export default function MicSelector({ selectedDeviceId, onSelect }: MicSelectorProps) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [loading, setLoading] = useState(true)
+  const [testing, setTesting] = useState(false)
+  const [level, setLevel] = useState(0) // 0-1 volume level
+
+  const testStreamRef = useRef<MediaStream | null>(null)
+  const testCtxRef = useRef<AudioContext | null>(null)
+  const testRAFRef = useRef<number>(0)
+  const testTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -41,6 +48,80 @@ export default function MicSelector({ selectedDeviceId, onSelect }: MicSelectorP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const stopTest = useCallback(() => {
+    if (testRAFRef.current) cancelAnimationFrame(testRAFRef.current)
+    if (testTimerRef.current) clearTimeout(testTimerRef.current)
+    testStreamRef.current?.getTracks().forEach(t => t.stop())
+    testStreamRef.current = null
+    if (testCtxRef.current?.state !== 'closed') {
+      testCtxRef.current?.close()
+    }
+    testCtxRef.current = null
+    setTesting(false)
+    setLevel(0)
+  }, [])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { stopTest() }
+  }, [stopTest])
+
+  const startTest = useCallback(async () => {
+    // Stop any existing test first
+    stopTest()
+
+    try {
+      const constraints: MediaTrackConstraints = {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      }
+      if (selectedDeviceId) {
+        constraints.deviceId = { exact: selectedDeviceId }
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints })
+      testStreamRef.current = stream
+
+      const ctx = new AudioContext()
+      if (ctx.state === 'suspended') await ctx.resume()
+      testCtxRef.current = ctx
+
+      const source = ctx.createMediaStreamSource(stream)
+
+      // Route mic → speakers so user hears themselves
+      source.connect(ctx.destination)
+
+      // Analyser for volume level display
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 256
+      source.connect(analyser)
+      const dataArr = new Uint8Array(analyser.frequencyBinCount)
+
+      function tick() {
+        analyser.getByteTimeDomainData(dataArr)
+        // Compute RMS level (0-1)
+        let sum = 0
+        for (let i = 0; i < dataArr.length; i++) {
+          const v = (dataArr[i] - 128) / 128
+          sum += v * v
+        }
+        const rms = Math.sqrt(sum / dataArr.length)
+        setLevel(Math.min(1, rms * 3)) // amplify for visual
+        testRAFRef.current = requestAnimationFrame(tick)
+      }
+      tick()
+
+      setTesting(true)
+
+      // Auto-stop after 8 seconds
+      testTimerRef.current = setTimeout(() => {
+        stopTest()
+      }, 8000)
+    } catch {
+      stopTest()
+    }
+  }, [selectedDeviceId, stopTest])
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-xs text-text-muted">
@@ -52,19 +133,55 @@ export default function MicSelector({ selectedDeviceId, onSelect }: MicSelectorP
   if (devices.length === 0) return null
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       <label className="text-xs font-medium text-text-muted">{'🎤 מיקרופון'}</label>
-      <select
-        value={selectedDeviceId || ''}
-        onChange={(e) => onSelect(e.target.value || null)}
-        className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:ring-1 focus:ring-primary"
-      >
-        {devices.map((d) => (
-          <option key={d.deviceId} value={d.deviceId}>
-            {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
-          </option>
-        ))}
-      </select>
+      <div className="flex items-center gap-2">
+        <select
+          value={selectedDeviceId || ''}
+          onChange={(e) => {
+            onSelect(e.target.value || null)
+            if (testing) stopTest()
+          }}
+          disabled={testing}
+          className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-50"
+        >
+          {devices.map((d) => (
+            <option key={d.deviceId} value={d.deviceId}>
+              {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={testing ? stopTest : startTest}
+          className={`shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+            testing
+              ? 'bg-status-fragile/20 text-status-fragile border border-status-fragile/40 hover:bg-status-fragile/30'
+              : 'bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20'
+          }`}
+        >
+          {testing ? 'עצור' : 'בדוק'}
+        </button>
+      </div>
+
+      {/* Volume level bar — shown while testing */}
+      {testing && (
+        <div className="space-y-1">
+          <div className="h-2.5 w-full rounded-full bg-border/30 overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-75"
+              style={{
+                width: `${Math.round(level * 100)}%`,
+                backgroundColor: level > 0.6 ? 'var(--color-status-solid, #22c55e)'
+                  : level > 0.2 ? 'var(--color-status-developing, #eab308)'
+                  : 'var(--color-border, #d1d5db)',
+              }}
+            />
+          </div>
+          <p className="text-[10px] text-text-muted">
+            {'דבר/י למיקרופון — אתה אמור/ה לשמוע את עצמך. ייעצר אוטומטית.'}
+          </p>
+        </div>
+      )}
     </div>
   )
 }
