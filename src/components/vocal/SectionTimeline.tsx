@@ -114,39 +114,23 @@ function NoteStaff({
   }
   if (!isFinite(minP)) { minP = 0; maxP = 8 }
 
-  // Place 5 staff lines centered on the note range, each 2 diatonic steps apart
-  const center = Math.round((minP + maxP) / 2)
-  // Round center to nearest even number so lines fall on natural notes
-  const centerEven = Math.round(center / 2) * 2
-  const staffLines = [
-    centerEven - 4,
-    centerEven - 2,
-    centerEven,
-    centerEven + 2,
-    centerEven + 4,
-  ]
-  const staffBottom = staffLines[0]
-  const staffTop = staffLines[4]
-
-  // Compute ledger lines for notes outside the staff
-  function getLedgerLines(pos: number): number[] {
-    const lines: number[] = []
-    if (pos < staffBottom)
-      for (let lp = staffBottom - 2; lp >= pos; lp -= 2) lines.push(lp)
-    if (pos > staffTop)
-      for (let lp = staffTop + 2; lp <= pos; lp += 2) lines.push(lp)
-    return lines
+  // Staff lines covering the full note range, every 2 diatonic steps
+  const lineStart = Math.floor((minP - 1) / 2) * 2
+  const lineEnd = Math.ceil((maxP + 1) / 2) * 2
+  const staffLines: number[] = []
+  for (let pos = lineStart; pos <= lineEnd; pos += 2) {
+    staffLines.push(pos)
   }
 
-  // Expand view range to include all notes + padding
-  const viewMin = Math.min(minP, staffBottom) - 2
-  const viewMax = Math.max(maxP, staffTop) + 2
+  // View range = full staff + padding
+  const viewMin = lineStart - 2
+  const viewMax = lineEnd + 2
 
   const STEP = 8
   const PAD_T = 14
   const PAD_B = 18
   const COL = 34
-  const MARGIN_L = 38
+  const MARGIN_L = 44
 
   const yOf = (pos: number) => PAD_T + (viewMax - pos) * STEP
   const svgH = PAD_T + (viewMax - viewMin) * STEP + PAD_B
@@ -195,9 +179,6 @@ function NoteStaff({
           const up = nc.userNote ? diaPos(nc.userNote) : null
           const ri = nc.refNote ? parseSolfege(nc.refNote) : null
           const ui = nc.userNote ? parseSolfege(nc.userNote) : null
-          const ledgers = new Set<number>()
-          if (rp !== null) getLedgerLines(rp).forEach(p => ledgers.add(p))
-          if (up !== null) getLedgerLines(up).forEach(p => ledgers.add(p))
           const both = rp !== null && up !== null
           const rx = both ? cx - 6 : cx
           const ux = both ? cx + 6 : cx
@@ -205,12 +186,6 @@ function NoteStaff({
 
           return (
             <g key={nc.noteIndex}>
-              {[...ledgers].map(lp => (
-                <line key={`lg${lp}`}
-                  x1={cx - 10} y1={yOf(lp)} x2={cx + 10} y2={yOf(lp)}
-                  stroke="var(--color-border, #d1d5db)" strokeWidth={0.8} />
-              ))}
-
               {rp !== null && up !== null && rp !== up && (
                 <line x1={cx} y1={yOf(rp)} x2={cx} y2={yOf(up)}
                   stroke="var(--color-border, #e5e7eb)" strokeWidth={0.5} strokeDasharray="2,2" />
