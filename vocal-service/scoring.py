@@ -230,15 +230,19 @@ def _align_notes(
     ref_pitch_times: list | None = None,
     tolerance_s: float = 1.5,
 ) -> list[dict]:
-    """Align reference notes to user notes using DTW time mapping + pitch.
+    """Align reference notes to user notes using global sequence alignment (DP).
 
-    Uses the DTW alignment path to map reference timestamps to user
-    timestamps, then scores candidates by BOTH time proximity and pitch
-    similarity (70% pitch, 30% time).  This prevents a single mistake
-    from throwing off everything — each ref note independently finds its
-    best match considering what it actually sounds like.
+    Uses Needleman-Wunsch style dynamic programming to find the globally
+    optimal pairing.  This prevents one mistake from throwing off all
+    subsequent comparisons — each ref note is either matched to a user
+    note or marked as missed, and extra user notes are silently skipped.
     """
-    # Build DTW time mapping: ref_time → user_time via interpolation
+    n = len(ref_notes)
+    m = len(user_notes)
+    if n == 0:
+        return []
+
+    # Build DTW time mapping for timing offset calculation
     map_fn = None
     if alignment and user_pitch_times and ref_pitch_times:
         path = alignment.get("path", [])
@@ -253,35 +257,67 @@ def _align_notes(
             usr_arr = np.array(dtw_user_t)
             map_fn = lambda t: float(np.interp(t, ref_arr, usr_arr))
 
+    # DP alignment — cost of skipping (insertion/deletion) vs matching
+    SKIP_COST = 2.5  # equivalent to ~250 cents mismatch
+    _MATCH, _SKIP_REF, _SKIP_USER = 0, 1, 2
+
+    dp = [[0.0] * (m + 1) for _ in range(n + 1)]
+    choice = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(1, n + 1):
+        dp[i][0] = dp[i - 1][0] + SKIP_COST
+        choice[i][0] = _SKIP_REF
+    for j in range(1, m + 1):
+        dp[0][j] = dp[0][j - 1] + SKIP_COST
+        choice[0][j] = _SKIP_USER
+
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            pitch_cost = _cents_between(
+                ref_notes[i - 1].get("hz", 0), user_notes[j - 1].get("hz", 0)
+            ) / 100.0
+            match_cost = min(pitch_cost, SKIP_COST * 2)  # cap extreme values
+
+            options = [
+                (dp[i - 1][j - 1] + match_cost, _MATCH),
+                (dp[i - 1][j] + SKIP_COST, _SKIP_REF),
+                (dp[i][j - 1] + SKIP_COST, _SKIP_USER),
+            ]
+            best_cost, best_choice = min(options, key=lambda x: x[0])
+            dp[i][j] = best_cost
+            choice[i][j] = best_choice
+
+    # Backtrack to find optimal pairing
+    pairs: list[tuple[int, int | None]] = []
+    i, j = n, m
+    while i > 0 or j > 0:
+        if i > 0 and j > 0:
+            c = choice[i][j]
+            if c == _MATCH:
+                pairs.append((i - 1, j - 1))
+                i -= 1
+                j -= 1
+            elif c == _SKIP_REF:
+                pairs.append((i - 1, None))
+                i -= 1
+            else:
+                j -= 1  # skip extra user note
+        elif i > 0:
+            pairs.append((i - 1, None))
+            i -= 1
+        else:
+            j -= 1
+    pairs.reverse()
+
+    # Build result
     aligned: list[dict] = []
-    used: set[int] = set()
-
-    for r_idx, ref in enumerate(ref_notes):
-        # Map reference time to expected user time via DTW
-        expected_t = map_fn(ref["startTime"]) if map_fn else ref["startTime"]
-
-        # Score candidates by combined time + pitch similarity
-        best_match: int | None = None
-        best_score = float("inf")
-        for j, user in enumerate(user_notes):
-            if j in used:
-                continue
-            time_diff = abs(user["startTime"] - expected_t)
-            if time_diff > tolerance_s:
-                continue
-            pitch_diff = _cents_between(ref.get("hz", 0), user.get("hz", 0))
-            # Combined score: pitch matters more than time
-            score = (time_diff / tolerance_s) * 0.3 + min(pitch_diff / 600.0, 1.0) * 0.7
-            if score < best_score:
-                best_match = j
-                best_score = score
-
+    for r_idx, u_idx in pairs:
+        ref = ref_notes[r_idx]
         ref_class = _note_class(ref["note"])
         ref_oct = _octave_num(ref["note"])
+        expected_t = map_fn(ref["startTime"]) if map_fn else ref["startTime"]
 
-        if best_match is not None:
-            used.add(best_match)
-            user = user_notes[best_match]
+        if u_idx is not None:
+            user = user_notes[u_idx]
             user_class = _note_class(user["note"])
             user_oct = _octave_num(user["note"])
 

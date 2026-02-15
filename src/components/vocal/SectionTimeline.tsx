@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 
 interface SectionScore {
   score: number | null
@@ -277,7 +277,7 @@ function NoteLineComparison({
 }: {
   notes: NoteComparison[]
   playSnippet: (startSec: number, duration: number, type: 'ref' | 'user') => void
-  playingSnippet: { time: number; type: 'ref' | 'user' } | null
+  playingSnippet: { type: 'ref' | 'user'; currentTime: number } | null
 }) {
   if (notes.length === 0) return null
 
@@ -307,9 +307,9 @@ function NoteLineComparison({
         const userEnd = userEnds.length > 0 ? Math.max(...userEnds) : null
 
         const isPlayingRefLine = playingSnippet?.type === 'ref' &&
-          playingSnippet.time >= refStart - 0.01 && playingSnippet.time <= refEnd + 0.01
+          playingSnippet.currentTime >= refStart - 0.05 && playingSnippet.currentTime <= refEnd + 0.3
         const isPlayingUserLine = userStart != null && playingSnippet?.type === 'user' &&
-          playingSnippet.time >= userStart - 0.01 && playingSnippet.time <= (userEnd ?? userStart) + 0.01
+          playingSnippet.currentTime >= userStart - 0.05 && playingSnippet.currentTime <= (userEnd ?? userStart) + 0.3
 
         return (
           <div key={lineIdx} className="rounded-lg border border-border/30 bg-surface/30 px-2.5 py-1.5 space-y-1">
@@ -326,14 +326,16 @@ function NoteLineComparison({
               </button>
               <div className="flex items-center gap-0.5 flex-wrap">
                 {line.map((nc) => {
-                  const isPlaying = playingSnippet?.time === nc.refStartTime && playingSnippet?.type === 'ref'
+                  const isPlaying = playingSnippet?.type === 'ref' &&
+                    playingSnippet.currentTime >= nc.refStartTime - 0.02 &&
+                    playingSnippet.currentTime < nc.refEndTime + 0.02
                   return (
                     <button
                       key={nc.noteIndex}
                       onClick={() => playSnippet(nc.refStartTime, nc.refEndTime - nc.refStartTime, 'ref')}
-                      className={`font-mono text-[11px] leading-tight px-1 py-0.5 rounded border transition-colors ${
+                      className={`font-mono text-[11px] leading-tight px-1 py-0.5 rounded border transition-all ${
                         isPlaying
-                          ? 'border-primary bg-primary/20 text-primary'
+                          ? 'border-primary bg-primary/30 text-primary scale-125 shadow-sm font-bold'
                           : 'border-border/40 text-text-muted hover:bg-primary/10'
                       }`}
                     >
@@ -360,8 +362,9 @@ function NoteLineComparison({
               <div className="flex items-center gap-0.5 flex-wrap">
                 {line.map((nc) => {
                   const { color } = noteMatchIcon(nc)
-                  const isPlaying = nc.userStartTime != null &&
-                    playingSnippet?.time === nc.userStartTime && playingSnippet?.type === 'user'
+                  const isPlaying = nc.userStartTime != null && playingSnippet?.type === 'user' &&
+                    playingSnippet.currentTime >= nc.userStartTime - 0.02 &&
+                    playingSnippet.currentTime < (nc.userEndTime ?? nc.userStartTime + 0.5) + 0.02
                   const isMatch = nc.noteMatch || nc.pitchClassMatch
                   return (
                     <button
@@ -370,9 +373,9 @@ function NoteLineComparison({
                         ? playSnippet(nc.userStartTime, (nc.userEndTime ?? nc.userStartTime + 0.5) - nc.userStartTime, 'user')
                         : undefined}
                       disabled={!nc.userNote}
-                      className={`font-mono text-[11px] leading-tight px-1 py-0.5 rounded border transition-colors ${
+                      className={`font-mono text-[11px] leading-tight px-1 py-0.5 rounded border transition-all ${
                         isPlaying
-                          ? 'border-primary bg-primary/20 text-primary'
+                          ? 'border-primary bg-primary/30 text-primary scale-125 shadow-sm font-bold'
                           : isMatch
                             ? 'border-status-solid/40 bg-status-solid/10'
                             : nc.userNote
@@ -401,7 +404,14 @@ export default function SectionTimeline({
   noteComparison,
 }: SectionTimelineProps) {
   const [showNotes, setShowNotes] = useState(false)
-  const [playingSnippet, setPlayingSnippet] = useState<{ time: number; type: 'ref' | 'user' } | null>(null)
+  const [playingSnippet, setPlayingSnippet] = useState<{
+    type: 'ref' | 'user'
+    startOffset: number
+    duration: number
+    wallStart: number
+    currentTime: number
+  } | null>(null)
+  const playbackRAFRef = useRef<number>(0)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null)
   const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -419,6 +429,9 @@ export default function SectionTimeline({
     }
     if (stopTimerRef.current) {
       clearTimeout(stopTimerRef.current)
+    }
+    if (playbackRAFRef.current) {
+      cancelAnimationFrame(playbackRAFRef.current)
     }
 
     // Lazy-init AudioContext
@@ -451,13 +464,33 @@ export default function SectionTimeline({
     const durSec = Math.max(0.5, duration)
     source.start(0, startSec, durSec)
     sourceNodeRef.current = source
-    setPlayingSnippet({ time: startSec, type })
+    const wallStart = performance.now()
+    setPlayingSnippet({ type, startOffset: startSec, duration: durSec, wallStart, currentTime: startSec })
 
     stopTimerRef.current = setTimeout(() => {
       sourceNodeRef.current = null
       setPlayingSnippet(null)
+      if (playbackRAFRef.current) cancelAnimationFrame(playbackRAFRef.current)
     }, durSec * 1000)
   }, [refAudioUrl, userAudioUrl])
+
+  // Animate current playback position for real-time note highlighting
+  useEffect(() => {
+    if (!playingSnippet) return
+    const { wallStart, startOffset, duration } = playingSnippet
+    function tick() {
+      const elapsed = (performance.now() - wallStart) / 1000
+      if (elapsed >= duration) {
+        setPlayingSnippet(null)
+        return
+      }
+      setPlayingSnippet(prev => prev ? { ...prev, currentTime: startOffset + elapsed } : null)
+      playbackRAFRef.current = requestAnimationFrame(tick)
+    }
+    playbackRAFRef.current = requestAnimationFrame(tick)
+    return () => { if (playbackRAFRef.current) cancelAnimationFrame(playbackRAFRef.current) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playingSnippet?.wallStart])
 
   if (sections.length === 0 || totalDurationMs === 0) return null
 

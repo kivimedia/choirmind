@@ -79,7 +79,7 @@ export function useVocalRecorder(options?: UseVocalRecorderOptions): VocalRecord
       const audioConstraints: MediaTrackConstraints = {
         echoCancellation: !headphones,
         noiseSuppression: !headphones,
-        autoGainControl: !headphones,
+        autoGainControl: false, // always off — causes volume pumping / distortion
       }
       if (options?.deviceId) {
         audioConstraints.deviceId = { exact: options.deviceId }
