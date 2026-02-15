@@ -277,6 +277,13 @@ function NoteLineComparison({
   if (lineTimestamps && lineTimestamps.length > 1) {
     // Build time boundaries from lyric line timestamps (in ms → convert to seconds)
     const boundaries = lineTimestamps.map(t => t / 1000)
+
+    // Notes BEFORE the first lyric line (e.g. instrumental intro 0:00-0:19)
+    const preLineNotes = notes.filter(n => n.refStartTime < boundaries[0] - 0.05)
+    if (preLineNotes.length > 0) {
+      lines.push({ notes: preLineNotes })
+    }
+
     for (let li = 0; li < boundaries.length; li++) {
       const tStart = boundaries[li]
       const tEnd = li + 1 < boundaries.length ? boundaries[li + 1] : Infinity
@@ -285,7 +292,7 @@ function NoteLineComparison({
         lines.push({ notes: lineNotes, lyric: lyricLines?.[li] })
       }
     }
-    // Catch any notes outside the timestamp boundaries
+    // Catch any notes after the last boundary
     const assigned = new Set(lines.flatMap(l => l.notes.map(n => n.noteIndex)))
     const remaining = notes.filter(n => !assigned.has(n.noteIndex))
     if (remaining.length > 0) {
@@ -425,7 +432,7 @@ export default function SectionTimeline({
   lyricLines,
   lineTimestamps,
 }: SectionTimelineProps) {
-  const [showNotes, setShowNotes] = useState(false)
+  const [showNotes, setShowNotes] = useState(true)
   const [playingSnippet, setPlayingSnippet] = useState<{
     type: 'ref' | 'user'
     startOffset: number

@@ -105,6 +105,7 @@ export default function SessionDetailPage() {
 
   const [session, setSession] = useState<Record<string, unknown> | null>(null)
   const [chunks, setChunks] = useState<ChunkData[]>([])
+  const [refVocalUrl, setRefVocalUrl] = useState<string | null>(null)
   const [quota, setQuota] = useState<QuotaData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -130,6 +131,12 @@ export default function SessionDetailPage() {
         if (chunksRes.status === 'fulfilled' && chunksRes.value.ok) {
           const songData = await chunksRes.value.json()
           setChunks(songData.song?.chunks ?? [])
+          // Get reference vocal URL for this voice part
+          const refs = songData.song?.referenceVocals ?? []
+          const matchRef = refs.find((r: { voicePart: string; isolatedFileUrl?: string }) =>
+            r.voicePart === s.voicePart && r.isolatedFileUrl)
+            ?? refs.find((r: { isolatedFileUrl?: string }) => r.isolatedFileUrl)
+          if (matchRef?.isolatedFileUrl) setRefVocalUrl(matchRef.isolatedFileUrl)
         }
         if (quotaRes.status === 'fulfilled' && quotaRes.value.ok) {
           const q = await quotaRes.value.json()
@@ -191,9 +198,9 @@ export default function SessionDetailPage() {
     try { return JSON.parse(c.lineTimestamps || '[]') } catch { return [] }
   })
 
-  // Ref audio URL: isolated vocal from analysis
-  const refAudioUrl = isolatedVocalUrl || null
-  const userAudioUrl = originalRecordingUrl || null
+  // Ref = actual reference vocal from the song; User = their isolated or original recording
+  const refAudioUrl = refVocalUrl
+  const userAudioUrl = isolatedVocalUrl || originalRecordingUrl || null
 
   // Quota bar
   const quotaPct = quota ? Math.min(100, Math.round((quota.freeSecondsUsed / quota.totalAllowance) * 100)) : 0

@@ -793,7 +793,7 @@ export default function FullSongRecordingPanel({
                 totalDurationMs={
                   result.sectionScores[result.sectionScores.length - 1].endTime * 1000
                 }
-                refAudioUrl={refVocalUrl || result.isolatedVocalUrl}
+                refAudioUrl={refVocalUrl}
                 userAudioUrl={useHeadphones ? (recordingBlobUrl || result.originalRecordingUrl) : (result.isolatedVocalUrl || recordingBlobUrl)}
                 noteComparison={result.noteComparison}
                 lyricLines={chunks.flatMap(c => c.lyrics.split('\n').filter(Boolean))}
@@ -805,10 +805,10 @@ export default function FullSongRecordingPanel({
             {(refVocalUrl || result.isolatedVocalUrl || recordingBlobUrl) && (
               <div className="space-y-2">
                 <h3 className="text-sm font-semibold text-foreground">השוואת ביצוע</h3>
-                {(refVocalUrl || result.isolatedVocalUrl) && (
+                {refVocalUrl && (
                   <div>
                     <p className="text-xs text-text-muted mb-1">קול ייחוס (מבודד מהשיר)</p>
-                    <audio controls src={refVocalUrl || result.isolatedVocalUrl || ''} className="w-full h-10" preload="metadata" />
+                    <audio controls src={refVocalUrl} className="w-full h-10" preload="metadata" />
                   </div>
                 )}
                 {(useHeadphones ? (recordingBlobUrl || result.originalRecordingUrl) : result.isolatedVocalUrl || recordingBlobUrl) && (
