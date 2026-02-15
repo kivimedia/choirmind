@@ -198,9 +198,9 @@ export default function PricingPage() {
         </div>
       </div>
 
-      {/* Manage existing subscription */}
-      {quota?.plan && (
-        <div className="text-center">
+      {/* Manage subscription / update payment method */}
+      {quota?.plan ? (
+        <div className="text-center space-y-2">
           <button
             className="text-sm text-text-muted underline hover:text-foreground transition-colors"
             onClick={handlePortal}
@@ -208,7 +208,16 @@ export default function PricingPage() {
             ניהול מנוי ותשלומים
           </button>
         </div>
-      )}
+      ) : quota?.purchasedSeconds && quota.purchasedSeconds > 0 ? (
+        <div className="text-center">
+          <button
+            className="text-sm text-text-muted underline hover:text-foreground transition-colors"
+            onClick={handlePortal}
+          >
+            עדכון אמצעי תשלום
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }
