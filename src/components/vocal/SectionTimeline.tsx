@@ -325,15 +325,14 @@ function NoteLineComparison({
 
         return (
           <div key={lineIdx} className="rounded-lg border border-border/30 bg-surface/30 px-2.5 py-1.5 space-y-1">
-            {/* Lyric text + timestamp header */}
-            <div className="flex items-center justify-between gap-2">
-              {lineData.lyric && (
-                <span className="text-[10px] text-text-muted/70 truncate" dir="rtl">{lineData.lyric}</span>
-              )}
-              <span className="shrink-0 text-[9px] text-text-muted/50 tabular-nums">
-                {formatTime(refStart)}–{formatTime(refEnd)}
-              </span>
-            </div>
+            {/* Lyric text */}
+            {lineData.lyric && (
+              <p className="text-sm text-foreground/90 leading-snug" dir="rtl">{lineData.lyric}</p>
+            )}
+            {/* Timestamp */}
+            <span className="text-[9px] text-text-muted/50 tabular-nums">
+              {formatTime(refStart)}–{formatTime(refEnd)}
+            </span>
             {/* Reference line */}
             <div className="flex items-center gap-1.5">
               <button

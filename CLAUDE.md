@@ -104,6 +104,12 @@ The app requires these in `.env.local`:
 - `VOCAL_SERVICE_URL` — Modal endpoint URL
 - Optional: `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `OPENAI_API_KEY` (Whisper auto-sync)
 
+## Workflow Conventions
+
+- **"check the ss"** = Read the screenshot image from `C:\Users\raviv\Downloads\` (usually named `Screenshot_NNNN.jpg`), analyze it, then rename the file to a descriptive name (e.g., `scoring-stuck-172s.jpg`). Use the Bash tool to rename: `mv "/c/Users/raviv/Downloads/Screenshot_NNNN.jpg" "/c/Users/raviv/Downloads/descriptive-name.jpg"`
+- **Deploy frontend**: `git push` (Vercel auto-deploys from main)
+- **Deploy vocal service**: `cd vocal-service && PYTHONIOENCODING=utf-8 python -m modal deploy app.py`
+
 ## Conventions
 
 - Hebrew is the primary UI language; all user-facing strings go through next-intl (`useTranslations`)
