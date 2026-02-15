@@ -127,9 +127,11 @@ export default function PricingPage() {
           {PLANS.map((plan) => {
             const isCurrent = quota?.plan === plan.id
             return (
-              <Card key={plan.id} className={`relative ${plan.recommended ? 'ring-2 ring-primary/40' : ''}`}>
+              <Card key={plan.id} className={`relative overflow-visible ${plan.recommended ? 'ring-2 ring-primary/40' : ''}`}>
                 {plan.recommended && (
-                  <Badge variant="primary" className="absolute -top-2 right-4">מומלץ</Badge>
+                  <span className="absolute -top-3 right-4 z-10 inline-flex items-center rounded-full bg-primary px-3 py-1 text-xs font-semibold text-white shadow-sm">
+                    מומלץ
+                  </span>
                 )}
                 <div className="space-y-4">
                   <div>
