@@ -187,6 +187,7 @@ export default function PracticeSessionPage() {
         }),
       }
       setSong(songData)
+      document.title = `${songData.title} - תרגול`
 
       // Compute unified fade level: minimum across all chunks
       if (songData.chunks?.length > 0) {
