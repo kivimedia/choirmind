@@ -16,6 +16,11 @@ export const authOptions: NextAuthOptions = {
         console.log(`[AUTH] sendVerificationRequest called for: ${email}`)
         console.log(`[AUTH] Magic link URL: ${url}`)
 
+        // Wrap in a click-through page to prevent email security scanners
+        // from consuming the one-time token by pre-fetching the callback URL
+        const baseUrl = process.env.NEXTAUTH_URL || 'https://choirmind.vercel.app'
+        const safeUrl = `${baseUrl}/auth/verify-link?callbackUrl=${encodeURIComponent(url)}`
+
         const result = await sendEmail({
           to: email,
           subject: 'התחברות ל-ChoirMind',
@@ -30,7 +35,7 @@ export const authOptions: NextAuthOptions = {
                 <p style="font-size: 16px; color: #333; margin: 0 0 20px;">
                   לחצו על הכפתור כדי להתחבר לחשבון:
                 </p>
-                <a href="${url}"
+                <a href="${safeUrl}"
                    style="display: inline-block; background: #6C5CE7; color: #fff; font-size: 16px; font-weight: 600; padding: 12px 32px; border-radius: 8px; text-decoration: none;">
                   התחברות ל-ChoirMind
                 </a>
