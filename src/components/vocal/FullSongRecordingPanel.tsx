@@ -584,6 +584,9 @@ export default function FullSongRecordingPanel({
             <p className="text-sm text-text-muted">
               הקליטו את כל השיר מתחילתו ועד סופו. המילים יתקדמו אוטומטית בזמן ההקלטה.
             </p>
+            <p className="text-xs text-text-muted/70">
+              הקלטה עד 10 דקות. ניתוח לוקח 2-5 דקות.
+            </p>
 
             {/* Audio mode selector */}
             {(audioModeAvailable.vocalsOnly || audioModeAvailable.musicOnly) && (

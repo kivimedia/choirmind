@@ -1,9 +1,11 @@
 'use client'
 
 import { useState, useEffect, Fragment } from 'react'
+import Link from 'next/link'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import ProgressBar from '@/components/ui/ProgressBar'
+import ScoreDial from '@/components/vocal/ScoreDial'
 
 interface MemberProgress {
   memberId: string
@@ -15,6 +17,18 @@ interface MemberProgress {
   trend: number
   lastPractice: string | null
   songBests: Record<string, number>
+}
+
+interface MemberSession {
+  id: string
+  songId: string
+  voicePart: string
+  overallScore: number
+  pitchScore: number
+  timingScore: number
+  dynamicsScore: number
+  createdAt: string
+  song?: { id: string; title: string }
 }
 
 interface MemberVocalProgressProps {
@@ -60,6 +74,8 @@ export default function MemberVocalProgress({ choirId }: MemberVocalProgressProp
   const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [songNames, setSongNames] = useState<Record<string, string>>({})
+  const [memberSessions, setMemberSessions] = useState<Record<string, MemberSession[]>>({})
+  const [loadingSessions, setLoadingSessions] = useState<string | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -140,17 +156,31 @@ export default function MemberVocalProgress({ choirId }: MemberVocalProgressProp
                 <Fragment key={m.memberId}>
                   <tr
                     className={`transition-colors ${
-                      hasSongBests ? 'cursor-pointer hover:bg-surface-hover/50' : ''
+                      m.sessionCount > 0 ? 'cursor-pointer hover:bg-surface-hover/50' : ''
                     } ${expanded ? 'bg-surface-hover/30' : ''}`}
                     onClick={() => {
-                      if (hasSongBests) {
-                        setExpandedId(expanded ? null : m.memberId)
+                      if (m.sessionCount > 0) {
+                        const newId = expanded ? null : m.memberId
+                        setExpandedId(newId)
+                        // Fetch member sessions if expanding and not already loaded
+                        if (newId && !memberSessions[m.userId]) {
+                          setLoadingSessions(m.userId)
+                          fetch(`/api/director/member-sessions?choirId=${choirId}&memberId=${m.userId}&limit=10`)
+                            .then(res => res.ok ? res.json() : null)
+                            .then(data => {
+                              if (data?.sessions) {
+                                setMemberSessions(prev => ({ ...prev, [m.userId]: data.sessions }))
+                              }
+                            })
+                            .catch(() => {})
+                            .finally(() => setLoadingSessions(null))
+                        }
                       }
                     }}
                   >
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-2">
-                        {hasSongBests && (
+                        {m.sessionCount > 0 && (
                           <span className={`text-xs transition-transform ${expanded ? 'rotate-90' : ''}`}>
                             ◀
                           </span>
@@ -196,25 +226,66 @@ export default function MemberVocalProgress({ choirId }: MemberVocalProgressProp
                     </td>
                   </tr>
 
-                  {/* Expanded: per-song breakdown */}
-                  {expanded && hasSongBests && (
+                  {/* Expanded: member sessions */}
+                  {expanded && (
                     <tr>
                       <td colSpan={6} className="bg-surface-hover/20 px-5 py-3">
-                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                          {Object.entries(m.songBests).map(([songId, bestScore]) => (
-                            <div
-                              key={songId}
-                              className={`flex items-center justify-between rounded-lg px-3 py-2 ${scoreBg(bestScore)}`}
-                            >
-                              <span className="text-sm text-foreground truncate">
-                                {songNames[songId] || songId.slice(0, 8)}
-                              </span>
-                              <span className={`text-sm font-bold tabular-nums ${scoreColor(bestScore)}`}>
-                                {bestScore}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
+                        {loadingSessions === m.userId ? (
+                          <div className="flex justify-center py-4">
+                            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                          </div>
+                        ) : memberSessions[m.userId]?.length ? (
+                          <div className="space-y-2">
+                            {memberSessions[m.userId].map((ms) => (
+                              <Link
+                                key={ms.id}
+                                href={`/vocal-practice/sessions/${ms.id}`}
+                                className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-surface-hover/50 transition-colors"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <ScoreDial score={ms.overallScore} size="sm" />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm font-medium text-foreground truncate">
+                                    {ms.song?.title || songNames[ms.songId] || ms.songId.slice(0, 8)}
+                                  </p>
+                                  <p className="text-xs text-text-muted">
+                                    {voicePartHe[ms.voicePart] ?? ms.voicePart}
+                                    {' · '}
+                                    {new Date(ms.createdAt).toLocaleDateString('he-IL', {
+                                      day: 'numeric',
+                                      month: 'short',
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })}
+                                  </p>
+                                </div>
+                                <div className="flex gap-2 text-xs text-text-muted shrink-0">
+                                  <span>גובה {Math.round(ms.pitchScore)}</span>
+                                  <span>תזמון {Math.round(ms.timingScore)}</span>
+                                  <span>דינמיקה {Math.round(ms.dynamicsScore)}</span>
+                                </div>
+                              </Link>
+                            ))}
+                          </div>
+                        ) : hasSongBests ? (
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            {Object.entries(m.songBests).map(([songId, bestScore]) => (
+                              <div
+                                key={songId}
+                                className={`flex items-center justify-between rounded-lg px-3 py-2 ${scoreBg(bestScore)}`}
+                              >
+                                <span className="text-sm text-foreground truncate">
+                                  {songNames[songId] || songId.slice(0, 8)}
+                                </span>
+                                <span className={`text-sm font-bold tabular-nums ${scoreColor(bestScore)}`}>
+                                  {bestScore}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-text-muted text-center py-2">אין סשנים זמינים</p>
+                        )}
                       </td>
                     </tr>
                   )}

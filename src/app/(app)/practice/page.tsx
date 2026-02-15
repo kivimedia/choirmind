@@ -47,6 +47,7 @@ const STATUS_LABELS: Record<string, string> = {
   developing: 'מתפתח',
   solid: 'יציב',
   locked: 'נעול',
+  locked_in: 'נעול',
 }
 
 // ---------------------------------------------------------------------------

@@ -34,9 +34,22 @@ export async function GET(
       return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     }
 
-    // Only allow user to see their own sessions
+    // Allow owner or director of a choir the session owner belongs to
     if (vocalSession.userId !== userId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      const isDirector = await prisma.choirMember.findFirst({
+        where: {
+          userId,
+          role: 'director',
+          choir: {
+            members: {
+              some: { userId: vocalSession.userId },
+            },
+          },
+        },
+      })
+      if (!isDirector) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     return NextResponse.json({ session: vocalSession })

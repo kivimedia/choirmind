@@ -5,6 +5,13 @@ import Link from 'next/link'
 import Card from '@/components/ui/Card'
 import ScoreDial from '@/components/vocal/ScoreDial'
 import ScoreHistoryChart from '@/components/dashboard/ScoreHistoryChart'
+import ProgressBar from '@/components/ui/ProgressBar'
+
+interface QuotaData {
+  freeSecondsUsed: number
+  totalAllowance: number
+  hasChoirSubscription: boolean
+}
 
 interface VocalSession {
   id: string
@@ -30,15 +37,20 @@ const VOICE_PART_HE: Record<string, string> = {
 
 export default function VocalHistoryPage() {
   const [sessions, setSessions] = useState<VocalSession[]>([])
+  const [quota, setQuota] = useState<QuotaData | null>(null)
   const [loading, setLoading] = useState(true)
   const [filterSongId, setFilterSongId] = useState<string>('all')
 
   useEffect(() => {
-    async function fetchSessions() {
+    async function fetchData() {
       try {
-        const res = await fetch('/api/vocal-analysis/sessions?limit=100')
-        if (res.ok) {
-          const data = await res.json()
+        const [sessionsRes, quotaRes] = await Promise.allSettled([
+          fetch('/api/vocal-analysis/sessions?limit=100'),
+          fetch('/api/vocal-analysis/quota'),
+        ])
+
+        if (sessionsRes.status === 'fulfilled' && sessionsRes.value.ok) {
+          const data = await sessionsRes.value.json()
           setSessions(
             (data.sessions ?? []).map((s: VocalSession & { song?: { id: string; title: string } }) => ({
               ...s,
@@ -47,13 +59,17 @@ export default function VocalHistoryPage() {
             }))
           )
         }
+        if (quotaRes.status === 'fulfilled' && quotaRes.value.ok) {
+          const q = await quotaRes.value.json()
+          setQuota(q)
+        }
       } catch {
         // Graceful fallback
       } finally {
         setLoading(false)
       }
     }
-    fetchSessions()
+    fetchData()
   }, [])
 
   // Unique songs for filter dropdown
@@ -115,6 +131,35 @@ export default function VocalHistoryPage() {
           כל ההקלטות והציונים שלכם
         </p>
       </div>
+
+      {/* Quota bar */}
+      {quota && (
+        <Card>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-text-muted">קרדיט ניתוח קולי</span>
+              {quota.hasChoirSubscription ? (
+                <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                  ללא הגבלה
+                </span>
+              ) : (
+                <span className="text-foreground font-medium tabular-nums" dir="ltr">
+                  {Math.floor(quota.freeSecondsUsed / 60)}:{(quota.freeSecondsUsed % 60).toString().padStart(2, '0')}
+                  {' / '}
+                  {Math.floor(quota.totalAllowance / 60)}:{(quota.totalAllowance % 60).toString().padStart(2, '0')}
+                  {' דקות'}
+                </span>
+              )}
+            </div>
+            {!quota.hasChoirSubscription && (() => {
+              const pct = Math.min(100, Math.round((quota.freeSecondsUsed / quota.totalAllowance) * 100))
+              const status: 'solid' | 'developing' | 'shaky' | 'fragile' =
+                pct < 50 ? 'solid' : pct < 70 ? 'developing' : pct < 90 ? 'shaky' : 'fragile'
+              return <ProgressBar value={pct} size="sm" status={status} />
+            })()}
+          </div>
+        </Card>
+      )}
 
       {sessions.length === 0 ? (
         <Card>

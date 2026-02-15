@@ -248,6 +248,13 @@ export default function Navbar() {
               {userMenuOpen && (
                 <div className="absolute top-full end-0 mt-1 w-48 rounded-xl border border-border bg-surface py-1 shadow-lg">
                   <Link
+                    href="/vocal-practice/history"
+                    className="block px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-surface-hover"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    {t('recordings')}
+                  </Link>
+                  <Link
                     href="/profile"
                     className="block px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-surface-hover"
                     onClick={() => setUserMenuOpen(false)}
@@ -430,6 +437,13 @@ export default function Navbar() {
                   </p>
                 </div>
               </div>
+              <Link
+                href="/vocal-practice/history"
+                className="rounded-lg px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-surface-hover"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                {t('recordings')}
+              </Link>
               <Link
                 href="/profile"
                 className="rounded-lg px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-surface-hover"

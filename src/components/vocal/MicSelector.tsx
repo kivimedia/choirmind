@@ -7,16 +7,22 @@ interface MicSelectorProps {
   onSelect: (deviceId: string | null) => void
 }
 
+const STORAGE_KEY_ID = 'choirmind-mic-id'
+const STORAGE_KEY_LABEL = 'choirmind-mic-label'
+
 export default function MicSelector({ selectedDeviceId, onSelect }: MicSelectorProps) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [testing, setTesting] = useState(false)
   const [level, setLevel] = useState(0) // 0-1 volume level
+  const [restoredDefault, setRestoredDefault] = useState(false)
+  const [justSaved, setJustSaved] = useState(false)
 
   const testStreamRef = useRef<MediaStream | null>(null)
   const testCtxRef = useRef<AudioContext | null>(null)
   const testRAFRef = useRef<number>(0)
   const testTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -33,10 +39,25 @@ export default function MicSelector({ selectedDeviceId, onSelect }: MicSelectorP
         setDevices(mics)
 
         // Restore saved mic or auto-select first
-        if (!selectedDeviceId && mics.length > 0) {
-          const saved = localStorage.getItem('choirmind-mic-id')
-          const match = saved ? mics.find(m => m.deviceId === saved) : null
-          onSelect(match ? match.deviceId : mics[0].deviceId)
+        if (mics.length > 0) {
+          const savedId = localStorage.getItem(STORAGE_KEY_ID)
+          const savedLabel = localStorage.getItem(STORAGE_KEY_LABEL)
+
+          // Try matching by deviceId first, then fall back to label match
+          // (browser device IDs can rotate across sessions, but labels are stable)
+          let match = savedId ? mics.find(m => m.deviceId === savedId) : null
+          if (!match && savedLabel) {
+            match = mics.find(m => m.label === savedLabel)
+          }
+
+          if (match) {
+            // Persist the (possibly updated) deviceId
+            localStorage.setItem(STORAGE_KEY_ID, match.deviceId)
+            onSelect(match.deviceId)
+            setRestoredDefault(true)
+          } else if (!selectedDeviceId) {
+            onSelect(mics[0].deviceId)
+          }
         }
       } catch {
         // Permission denied or no devices — leave empty
@@ -48,6 +69,13 @@ export default function MicSelector({ selectedDeviceId, onSelect }: MicSelectorP
     enumerate()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Clear "saved" toast timer on unmount
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+    }
   }, [])
 
   const stopTest = useCallback(() => {
@@ -136,13 +164,36 @@ export default function MicSelector({ selectedDeviceId, onSelect }: MicSelectorP
 
   return (
     <div className="space-y-1.5">
-      <label className="text-xs font-medium text-text-muted">{'🎤 מיקרופון'}</label>
+      <div className="flex items-center gap-2">
+        <label className="text-xs font-medium text-text-muted">{'🎤 מיקרופון'}</label>
+        {restoredDefault && !justSaved && (
+          <span className="text-[10px] text-primary/70 font-medium">{'ברירת מחדל'}</span>
+        )}
+        {justSaved && (
+          <span className="text-[10px] text-status-solid font-medium animate-pulse">{'נשמר כברירת מחדל ✓'}</span>
+        )}
+      </div>
       <div className="flex items-center gap-2">
         <select
           value={selectedDeviceId || ''}
           onChange={(e) => {
             const id = e.target.value || null
-            if (id) localStorage.setItem('choirmind-mic-id', id)
+            if (id) {
+              localStorage.setItem(STORAGE_KEY_ID, id)
+              // Also save label for cross-session matching
+              const device = devices.find(d => d.deviceId === id)
+              if (device?.label) {
+                localStorage.setItem(STORAGE_KEY_LABEL, device.label)
+              }
+              // Show "saved" confirmation
+              setJustSaved(true)
+              setRestoredDefault(false)
+              if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+              savedTimerRef.current = setTimeout(() => {
+                setJustSaved(false)
+                setRestoredDefault(true)
+              }, 2500)
+            }
             onSelect(id)
             if (testing) stopTest()
           }}

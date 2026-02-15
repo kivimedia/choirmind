@@ -192,9 +192,10 @@ export async function POST(request: NextRequest) {
     // Trigger the Python vocal analysis service
     const vocalServiceUrl = process.env.VOCAL_SERVICE_URL
     if (vocalServiceUrl) {
-      // Fire-and-forget with 300s timeout: cold start + Demucs can take 2-3 min
+      // Fire-and-forget with 600s timeout: full songs can take 5+ min
+      // (cold start + Demucs isolation + feature extraction + scoring)
       const abortCtrl = new AbortController()
-      const timeout = setTimeout(() => abortCtrl.abort(), 300_000)
+      const timeout = setTimeout(() => abortCtrl.abort(), 600_000)
       fetch(`${vocalServiceUrl}/api/v1/process-vocal-analysis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
