@@ -17,7 +17,8 @@
     "login": "Log in",
     "allChoirs": "All Choirs",
     "manageChoir": "Manage Choir",
-    "adminPayments": "Manage Payments"
+    "adminPayments": "Manage Payments",
+    "adminEmailLogs": "Email Logs"
   },
   "auth": {
     "signIn": "Sign In",

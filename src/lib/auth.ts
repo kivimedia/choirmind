@@ -10,6 +10,7 @@ export const authOptions: NextAuthOptions = {
   providers: [
     // Email magic link via Resend
     EmailProvider({
+      maxAge: 60 * 60, // 60 minutes (magic link expiry)
       from: process.env.EMAIL_FROM || 'ChoirMind <noreply@dailycookie.co>',
       sendVerificationRequest: async ({ identifier: email, url }) => {
         console.log(`[AUTH] sendVerificationRequest called for: ${email}`)
@@ -34,7 +35,7 @@ export const authOptions: NextAuthOptions = {
                   התחברות ל-ChoirMind
                 </a>
                 <p style="font-size: 12px; color: #999; margin: 20px 0 0;">
-                  הקישור תקף ל-24 שעות. אם לא ביקשתם להתחבר, התעלמו מהודעה זו.
+                  הקישור תקף ל-60 דקות. אם לא ביקשתם להתחבר, התעלמו מהודעה זו.
                 </p>
               </div>
               <p style="font-size: 11px; color: #ccc; text-align: center; margin-top: 24px;">

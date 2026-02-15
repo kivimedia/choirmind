@@ -277,13 +277,22 @@ export default function Navbar() {
                     {t('settings')}
                   </Link>
                   {isAdmin && (
-                    <Link
-                      href="/admin/payments"
-                      className="block px-4 py-2.5 text-sm text-primary transition-colors hover:bg-surface-hover"
-                      onClick={() => setUserMenuOpen(false)}
-                    >
-                      {t('adminPayments')}
-                    </Link>
+                    <>
+                      <Link
+                        href="/admin/payments"
+                        className="block px-4 py-2.5 text-sm text-primary transition-colors hover:bg-surface-hover"
+                        onClick={() => setUserMenuOpen(false)}
+                      >
+                        {t('adminPayments')}
+                      </Link>
+                      <Link
+                        href="/admin/email-logs"
+                        className="block px-4 py-2.5 text-sm text-primary transition-colors hover:bg-surface-hover"
+                        onClick={() => setUserMenuOpen(false)}
+                      >
+                        {t('adminEmailLogs')}
+                      </Link>
+                    </>
                   )}
                   <hr className="my-1 border-border" />
                   <button
@@ -483,13 +492,22 @@ export default function Navbar() {
                 {t('settings')}
               </Link>
               {isAdmin && (
-                <Link
-                  href="/admin/payments"
-                  className="rounded-lg px-4 py-2.5 text-sm text-primary transition-colors hover:bg-surface-hover"
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  {t('adminPayments')}
-                </Link>
+                <>
+                  <Link
+                    href="/admin/payments"
+                    className="rounded-lg px-4 py-2.5 text-sm text-primary transition-colors hover:bg-surface-hover"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    {t('adminPayments')}
+                  </Link>
+                  <Link
+                    href="/admin/email-logs"
+                    className="rounded-lg px-4 py-2.5 text-sm text-primary transition-colors hover:bg-surface-hover"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    {t('adminEmailLogs')}
+                  </Link>
+                </>
               )}
               <button
                 type="button"

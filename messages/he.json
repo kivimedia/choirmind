@@ -17,7 +17,8 @@
     "login": "התחבר/י",
     "allChoirs": "כל המקהלות",
     "manageChoir": "ניהול מקהלה",
-    "adminPayments": "ניהול תשלומים"
+    "adminPayments": "ניהול תשלומים",
+    "adminEmailLogs": "יומן אימיילים"
   },
   "auth": {
     "signIn": "התחבר/י",
