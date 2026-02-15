@@ -257,8 +257,14 @@ def _align_notes(
             usr_arr = np.array(dtw_user_t)
             map_fn = lambda t: float(np.interp(t, ref_arr, usr_arr))
 
+    # Pre-compute expected user times for each ref note via DTW mapping
+    ref_expected_t = []
+    for ref in ref_notes:
+        ref_expected_t.append(map_fn(ref["startTime"]) if map_fn else ref["startTime"])
+
     # DP alignment — cost of skipping (insertion/deletion) vs matching
     SKIP_COST = 2.5  # equivalent to ~250 cents mismatch
+    TIME_MAX_S = 3.0  # time difference beyond this = max time penalty
     _MATCH, _SKIP_REF, _SKIP_USER = 0, 1, 2
 
     dp = [[0.0] * (m + 1) for _ in range(n + 1)]
@@ -275,7 +281,12 @@ def _align_notes(
             pitch_cost = _cents_between(
                 ref_notes[i - 1].get("hz", 0), user_notes[j - 1].get("hz", 0)
             ) / 100.0
-            match_cost = min(pitch_cost, SKIP_COST * 2)  # cap extreme values
+            # Time cost: penalise matches where user note is far from expected time
+            time_diff = abs(user_notes[j - 1]["startTime"] - ref_expected_t[i - 1])
+            time_cost = min(time_diff / TIME_MAX_S, 1.0) * SKIP_COST
+            # Combined: 60% pitch, 40% time
+            match_cost = pitch_cost * 0.6 + time_cost * 0.4
+            match_cost = min(match_cost, SKIP_COST * 2)  # cap extreme values
 
             options = [
                 (dp[i - 1][j - 1] + match_cost, _MATCH),
