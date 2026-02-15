@@ -541,7 +541,12 @@ export default function SongDetailPage() {
         <ChunkRecordingPanel
           isOpen={!!recordingChunk}
           onClose={() => setRecordingChunk(null)}
-          chunk={recordingChunk}
+          chunk={{
+            ...recordingChunk,
+            lineTimestamps: recordingChunk.lineTimestamps
+              ? (() => { try { return JSON.parse(recordingChunk.lineTimestamps) } catch { return null } })()
+              : null,
+          }}
           songId={songId}
           songTitle={song.title}
           voicePart={userVoicePart}
