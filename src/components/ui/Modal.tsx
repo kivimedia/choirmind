@@ -100,7 +100,7 @@ export default function Modal({
             exit={{ opacity: 0, scale: 0.95, y: 12 }}
             transition={dragging.current ? { duration: 0 } : { duration: 0.2, ease: 'easeOut' }}
             className={[
-              'relative z-10 w-full max-w-lg mx-4',
+              'relative z-10 w-full max-w-lg mx-4 flex flex-col max-h-[90vh]',
               'rounded-2xl border border-border bg-surface shadow-xl',
               resizable ? 'resize overflow-hidden' : '',
               className,
@@ -170,7 +170,7 @@ export default function Modal({
             )}
 
             {/* Body */}
-            <div className={resizable ? 'p-6 overflow-y-auto' : 'p-6'}>{children}</div>
+            <div className="p-6 overflow-y-auto flex-1 min-h-0">{children}</div>
           </motion.div>
         </div>
       )}

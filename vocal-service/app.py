@@ -56,14 +56,17 @@ image = (
         "pydantic",
         "demucs",
     )
-    .env({"TORCHAUDIO_BACKEND": "soundfile"})
+    .env({"TORCHAUDIO_BACKEND": "soundfile", "TORCH_HOME": "/root/.cache/torch"})
     # Pre-download all 4 Demucs htdemucs_ft checkpoint files into the image.
+    # Using Python+urllib to guarantee files persist on disk in the image layer.
     .run_commands(
         "python -c \""
-        "import torch; "
+        "import urllib.request, os; "
+        "d='/root/.cache/torch/hub/checkpoints'; os.makedirs(d, exist_ok=True); "
         "base='https://dl.fbaipublicfiles.com/demucs/hybrid_transformer'; "
-        "[torch.hub.load_state_dict_from_url(f'{base}/{n}.th', map_location='cpu') "
-        "for n in ['f7e0c4bc-ba3fe64a','d12395a8-e57c48e6','92cfc3b6-ef3bcb9c','04573f0d-f3cf25b2']]"
+        "names=['f7e0c4bc-ba3fe64a','d12395a8-e57c48e6','92cfc3b6-ef3bcb9c','04573f0d-f3cf25b2']; "
+        "[urllib.request.urlretrieve(f'{base}/{n}.th', f'{d}/{n}.th') or print(f'Downloaded {n}.th') for n in names]; "
+        "print('Files:', os.listdir(d))"
         "\""
     )
     .add_local_file("processing.py", "/root/processing.py")
@@ -165,9 +168,15 @@ def _update_job_status(
         conn.close()
 
 
-def _update_job_stage(job_id: str, stage: str):
-    """Update the stage field for progress tracking."""
-    conn = _get_db_conn()
+def _update_job_stage(job_id: str, stage: str, conn=None):
+    """Update the stage field for progress tracking.
+
+    If conn is provided, reuses it (caller manages lifecycle).
+    Otherwise opens and closes its own connection.
+    """
+    own_conn = conn is None
+    if own_conn:
+        conn = _get_db_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -176,7 +185,8 @@ def _update_job_stage(job_id: str, stage: str):
             )
         conn.commit()
     finally:
-        conn.close()
+        if own_conn:
+            conn.close()
 
 
 def _update_reference_status(
@@ -244,6 +254,7 @@ def _create_vocal_practice_session(
     duration_ms: int,
     xp_earned: int,
     isolated_vocal_url: Optional[str] = None,
+    original_recording_url: Optional[str] = None,
 ) -> str:
     """Insert a VocalPracticeSession row and return its id.
 
@@ -255,15 +266,16 @@ def _create_vocal_practice_session(
     """
     session_id = str(uuid.uuid4())
 
-    # Build the sectionScores JSON, optionally wrapping with isolatedVocalUrl
+    # Build the sectionScores JSON — always use wrapper format to include
+    # noteComparison and isolatedVocalUrl alongside the sections array.
     raw_sections = scores.get("sectionScores", [])
+    note_comparison = scores.get("noteComparison", [])
+    wrapper: dict = {"sections": raw_sections, "noteComparison": note_comparison}
     if isolated_vocal_url:
-        section_scores_json = json.dumps(
-            {"sections": raw_sections, "isolatedVocalUrl": isolated_vocal_url},
-            ensure_ascii=False,
-        )
-    else:
-        section_scores_json = json.dumps(raw_sections, ensure_ascii=False)
+        wrapper["isolatedVocalUrl"] = isolated_vocal_url
+    if original_recording_url:
+        wrapper["originalRecordingUrl"] = original_recording_url
+    section_scores_json = json.dumps(wrapper, ensure_ascii=False)
 
     conn = _get_db_conn()
     try:
@@ -396,9 +408,11 @@ def _find_reference_for_song(song_id: str, voice_part: str) -> Optional[str]:
         conn.close()
 
 
-def _get_song_title(song_id: str) -> Optional[str]:
+def _get_song_title(song_id: str, conn=None) -> Optional[str]:
     """Fetch song title for coaching context."""
-    conn = _get_db_conn()
+    own_conn = conn is None
+    if own_conn:
+        conn = _get_db_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -408,7 +422,8 @@ def _get_song_title(song_id: str) -> Optional[str]:
             row = cur.fetchone()
             return row[0] if row else None
     finally:
-        conn.close()
+        if own_conn:
+            conn.close()
 
 
 def _auto_create_reference(song_id: str, voice_part: str) -> Optional[dict]:
@@ -549,20 +564,24 @@ def _get_s3_client():
 
 
 def _convert_to_wav(audio_bytes: bytes) -> bytes:
-    """Convert any audio format (webm, opus, mp3, etc.) to WAV using librosa."""
-    import librosa
-    import soundfile as sf
-    import io
+    """Convert any audio format (webm, opus, mp3, etc.) to WAV using ffmpeg.
 
-    # Write input to a temp file (librosa needs a file path)
+    ffmpeg is much faster than librosa for simple format conversion
+    (no Python-level decoding/resampling needed).
+    """
+    import subprocess
+
     with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp_in:
         tmp_in.write(audio_bytes)
         tmp_in_path = tmp_in.name
 
     tmp_out_path = tmp_in_path.replace(".webm", ".wav")
     try:
-        y, sr = librosa.load(tmp_in_path, sr=22050, mono=True)
-        sf.write(tmp_out_path, y, sr)
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", tmp_in_path,
+             "-ar", "44100", "-ac", "1", "-acodec", "pcm_s16le", tmp_out_path],
+            check=True, capture_output=True, timeout=30,
+        )
         with open(tmp_out_path, "rb") as f:
             return f.read()
     finally:
@@ -712,8 +731,39 @@ def _extract_features_local(audio_bytes: bytes, filename: str) -> dict:
         os.unlink(tmp_path)
 
 
+def _score_and_coach_local(
+    user_features: dict,
+    ref_features: dict | None,
+    voice_part: str,
+    song_title: str | None = None,
+) -> dict:
+    """Run scoring + coaching in-process (no container spawn overhead)."""
+    from processing import align_features
+    from scoring import score_recording, score_standalone
+    from coaching import generate_coaching_tips
+
+    t0 = time.time()
+    if ref_features is not None:
+        alignment = align_features(user_features, ref_features)
+        logger.info("[PROFILE] align: %.1fs", time.time() - t0)
+
+        t1 = time.time()
+        scores = score_recording(user_features, ref_features, alignment)
+        logger.info("[PROFILE] score: %.1fs", time.time() - t1)
+    else:
+        logger.info("No reference available, running standalone analysis")
+        scores = score_standalone(user_features)
+        logger.info("[PROFILE] standalone_score: %.1fs", time.time() - t0)
+
+    # Coaching tips removed from UI — skip Anthropic API call entirely
+    coaching_tips: list[str] = []
+    logger.info("[PROFILE] coaching: skipped (tips not displayed)")
+
+    return {"scores": scores, "coachingTips": coaching_tips}
+
+
 # ---------------------------------------------------------------------------
-# CPU function: Scoring + coaching pipeline
+# CPU function: Scoring + coaching pipeline (kept for backward compat)
 # ---------------------------------------------------------------------------
 
 
@@ -801,7 +851,7 @@ async def health():
     return {
         "status": "healthy",
         "service": "choirmind-vocal-service",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -835,20 +885,19 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
         t0 = time.time()
         timings: dict[str, float] = {}
 
+        # Shared DB connection for the pipeline (avoids reconnecting per stage)
+        db = _get_db_conn()
+
         # 1. Mark job as PROCESSING + set initial stage in one DB call
-        conn = _get_db_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """UPDATE "VocalAnalysisJob"
-                       SET status = 'PROCESSING', stage = 'downloading',
-                           "startedAt" = NOW(), attempts = attempts + 1
-                       WHERE id = %s""",
-                    (req.jobId,),
-                )
-            conn.commit()
-        finally:
-            conn.close()
+        with db.cursor() as cur:
+            cur.execute(
+                """UPDATE "VocalAnalysisJob"
+                   SET status = 'PROCESSING', stage = 'downloading',
+                       "startedAt" = NOW(), attempts = attempts + 1
+                   WHERE id = %s""",
+                (req.jobId,),
+            )
+        db.commit()
 
         # 2. Download recording from S3
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -869,14 +918,15 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
         def _isolate_and_extract():
             """Steps 3+4: isolate vocals (or convert) then extract features."""
             t1 = time.time()
-            _update_job_stage(req.jobId, "isolating")
             if not req.useHeadphones:
+                _update_job_stage(req.jobId, "isolating")
                 logger.info("Running Demucs vocal isolation (no headphones)")
                 demucs_result = run_demucs_isolation.remote(
                     recording_bytes, "recording.wav"
                 )
                 vb = demucs_result["vocals"]
             else:
+                _update_job_stage(req.jobId, "converting")
                 logger.info("Headphones used -- skipping vocal isolation, converting to WAV")
                 vb = _convert_to_wav(recording_bytes)
             timings["isolate"] = time.time() - t1
@@ -948,23 +998,14 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
             vocal_bytes, isolated_vocal_url, user_features = future_isolate.result()
             ref_features, reference_vocal_id = future_ref.result()
 
-        # 6 + 7. Score and generate coaching tips
+        # 6 + 7. Score and generate coaching tips (in-process, no .remote())
         t1 = time.time()
-        _update_job_stage(req.jobId, "scoring")
-        song_title = _get_song_title(req.songId)
+        _update_job_stage(req.jobId, "scoring", conn=db)
+        song_title = _get_song_title(req.songId, conn=db)
 
-        if ref_features is not None:
-            # Normal comparison against reference
-            result = run_scoring_and_coaching.remote(
-                user_features, ref_features, req.voicePart, song_title
-            )
-        else:
-            # No reference available at all -- do standalone analysis
-            logger.info("No reference available, running standalone analysis")
-            result = run_standalone_scoring_and_coaching.remote(
-                user_features, req.voicePart, song_title
-            )
-
+        result = _score_and_coach_local(
+            user_features, ref_features, req.voicePart, song_title
+        )
         scores = result["scores"]
         coaching_tips = result["coachingTips"]
         timings["score_coach"] = time.time() - t1
@@ -972,8 +1013,13 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
 
         # 8. Compute XP and create VocalPracticeSession
         t1 = time.time()
-        _update_job_stage(req.jobId, "saving")
+        _update_job_stage(req.jobId, "saving", conn=db)
         xp_earned = _compute_xp(scores["overallScore"])
+
+        # Construct original recording URL for direct playback (no conversion)
+        _bucket = os.environ["AWS_S3_BUCKET"]
+        _region = os.environ.get("AWS_REGION", "eu-west-1")
+        original_recording_url = f"https://{_bucket}.s3.{_region}.amazonaws.com/{req.recordingS3Key}"
 
         session_id = _create_vocal_practice_session(
             user_id=req.userId,
@@ -986,13 +1032,24 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
             duration_ms=req.recordingDurationMs,
             xp_earned=xp_earned,
             isolated_vocal_url=isolated_vocal_url,
+            original_recording_url=original_recording_url,
         )
         timings["save"] = time.time() - t1
 
         # XP awarding is handled by the Next.js side when polling detects COMPLETED
 
-        # 9. Update job to COMPLETED
-        _update_job_status(req.jobId, "COMPLETED", practice_session_id=session_id)
+        # 9. Update job to COMPLETED (reuse shared connection)
+        now = datetime.now(timezone.utc)
+        with db.cursor() as cur:
+            cur.execute(
+                """UPDATE "VocalAnalysisJob"
+                   SET status = 'COMPLETED', "completedAt" = %s,
+                       "practiceSessionId" = %s
+                   WHERE id = %s""",
+                (now, session_id, req.jobId),
+            )
+        db.commit()
+        db.close()
 
         total_time = time.time() - t0
         logger.info(
@@ -1022,6 +1079,12 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
     except Exception as exc:
         error_msg = f"{type(exc).__name__}: {exc}"
         logger.error("Job %s failed: %s\n%s", req.jobId, error_msg, traceback.format_exc())
+
+        try:
+            if 'db' in locals() and db and not db.closed:
+                db.close()
+        except Exception:
+            pass
 
         try:
             _update_job_status(req.jobId, "FAILED", error_message=error_msg[:500])

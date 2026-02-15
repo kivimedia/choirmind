@@ -22,6 +22,7 @@ export interface VocalRecorderActions {
 
 export interface UseVocalRecorderOptions {
   backingTrackBuffer?: ArrayBuffer | null
+  useHeadphones?: boolean
 }
 
 export function useVocalRecorder(options?: UseVocalRecorderOptions): VocalRecorderState & VocalRecorderActions {
@@ -69,11 +70,16 @@ export function useVocalRecorder(options?: UseVocalRecorderOptions): VocalRecord
       setAudioBlob(null)
       chunksRef.current = []
 
+      // With headphones, disable ALL automatic audio processing —
+      // echoCancellation fights the backing track, noiseSuppression
+      // removes quiet passages, and autoGainControl causes sudden
+      // volume drops/spikes that sound like distortion.
+      const headphones = !!options?.useHeadphones
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          echoCancellation: !headphones,
+          noiseSuppression: !headphones,
+          autoGainControl: !headphones,
         },
       })
 
@@ -119,7 +125,7 @@ export function useVocalRecorder(options?: UseVocalRecorderOptions): VocalRecord
           ? 'audio/webm'
           : 'audio/mp4'
 
-      const recorder = new MediaRecorder(stream, { mimeType })
+      const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 128000 })
       mediaRecorderRef.current = recorder
 
       recorder.ondataavailable = (e) => {

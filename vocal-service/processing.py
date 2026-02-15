@@ -151,7 +151,11 @@ def extract_features(audio_path: str, sr: int = 22050) -> dict:
 
     # -- Onset detection --
     t2 = _time.time()
-    onset_frames = librosa.onset.onset_detect(y=y, sr=sr, units="frames")
+    onset_frames = librosa.onset.onset_detect(
+        y=y, sr=sr, units="frames",
+        delta=0.05,        # moderate threshold (default 0.07) — catches real attacks, ignores minor fluctuations
+        backtrack=True,     # snap onsets to nearest energy minimum
+    )
     onset_times = librosa.frames_to_time(onset_frames, sr=sr)
     logger.info("[FEAT] onsets: %.1fs (%d onsets)", _time.time() - t2, len(onset_times))
 
@@ -207,8 +211,30 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
     """
     logger.info("Running DTW alignment")
 
+    user_dur = user_features.get("duration_s", 0)
+    ref_dur = ref_features.get("duration_s", 0)
+
+    # Trim reference to user duration + 20% margin to avoid aligning a 20s
+    # recording against a 3-minute reference (causes huge DTW matrix and
+    # meaningless alignment in the unused tail).
+    max_ref_dur = user_dur * 1.2 + 5.0  # e.g. 20s recording → 29s of ref
+    ref_pitch_raw = ref_features["pitch_values"]
+    ref_times_raw = ref_features.get("pitch_times", [])
+    if ref_dur > max_ref_dur and ref_times_raw:
+        cut_idx = next(
+            (i for i, t in enumerate(ref_times_raw) if t > max_ref_dur),
+            len(ref_times_raw),
+        )
+        ref_pitch_raw = ref_pitch_raw[:cut_idx]
+        logger.info(
+            "Trimmed reference from %.1fs (%d frames) to %.1fs (%d frames)",
+            ref_dur, len(ref_features["pitch_values"]), max_ref_dur, cut_idx,
+        )
+    else:
+        cut_idx = None
+
     user_pitch = np.array(user_features["pitch_values"])
-    ref_pitch = np.array(ref_features["pitch_values"])
+    ref_pitch = np.array(ref_pitch_raw)
 
     # Replace NaN with 0 for DTW (we track voicing separately)
     user_pitch_dtw = np.nan_to_num(user_pitch, nan=0.0)
@@ -220,14 +246,26 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
 
     distance, path = fastdtw(user_seq, ref_seq, dist=euclidean, radius=50)
 
-    # Pre-compute per-pair deviations
+    # Pre-compute per-pair deviations (use trimmed ref arrays)
     user_times = np.array(user_features["pitch_times"])
-    ref_times = np.array(ref_features["pitch_times"])
+    ref_times = np.array(ref_times_raw[:cut_idx] if cut_idx else ref_times_raw)
 
     user_rms = np.array(user_features["rms_values"])
-    ref_rms = np.array(ref_features["rms_values"])
     user_rms_times = np.array(user_features["rms_times"])
-    ref_rms_times = np.array(ref_features["rms_times"])
+
+    # Trim ref RMS arrays to the same time window
+    ref_rms_raw = ref_features["rms_values"]
+    ref_rms_times_raw = ref_features["rms_times"]
+    if cut_idx and ref_rms_times_raw:
+        rms_cut = next(
+            (i for i, t in enumerate(ref_rms_times_raw) if t > max_ref_dur),
+            len(ref_rms_times_raw),
+        )
+        ref_rms = np.array(ref_rms_raw[:rms_cut])
+        ref_rms_times = np.array(ref_rms_times_raw[:rms_cut])
+    else:
+        ref_rms = np.array(ref_rms_raw)
+        ref_rms_times = np.array(ref_rms_times_raw)
 
     pitch_deviations = []  # in cents
     raw_timing_offsets = []  # in seconds (before normalization)
@@ -241,7 +279,8 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
         if np.isnan(u_f) or np.isnan(r_f) or u_f <= 0 or r_f <= 0:
             pitch_deviations.append(None)  # unvoiced
         else:
-            cents = 1200.0 * np.log2(u_f / r_f)
+            cents_raw = 1200.0 * np.log2(u_f / r_f)
+            cents = ((cents_raw + 600) % 1200) - 600  # fold to nearest octave
             pitch_deviations.append(round(float(cents), 2))
 
         # -- Timing offset (raw, before normalization) --
@@ -262,6 +301,35 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
         else:
             energy_ratios.append(None)
 
+    # --- Deduplicate path by user index ---
+    # DTW with mismatched lengths (e.g. 19s user vs 3min ref) creates many
+    # ref frames bunched onto single user frames.  Keep only one pair per
+    # unique user index (the one with the smallest pitch deviation) so that
+    # timing offsets reflect true 1:1 alignment quality.
+    dedup: dict[int, int] = {}  # u_idx -> best pair_idx
+    for pair_idx, (u_idx, r_idx) in enumerate(path):
+        if u_idx not in dedup:
+            dedup[u_idx] = pair_idx
+        else:
+            # Keep the pair with the smaller pitch deviation
+            existing_dev = pitch_deviations[dedup[u_idx]]
+            current_dev = pitch_deviations[pair_idx]
+            ex_abs = abs(existing_dev) if existing_dev is not None else 999
+            cu_abs = abs(current_dev) if current_dev is not None else 999
+            if cu_abs < ex_abs:
+                dedup[u_idx] = pair_idx
+
+    keep = sorted(dedup.values())
+    path_dedup = [path[i] for i in keep]
+    pitch_deviations = [pitch_deviations[i] for i in keep]
+    raw_timing_offsets = [raw_timing_offsets[i] for i in keep]
+    energy_ratios = [energy_ratios[i] for i in keep]
+
+    logger.info(
+        "DTW deduplication: %d pairs -> %d unique user frames",
+        len(path), len(keep),
+    )
+
     # Normalize timing offsets: subtract the median baseline offset.
     # When comparing a chunk (starts at 0s) against a full-song reference
     # (where the matching section starts at e.g. 28s), the raw offsets are
@@ -276,7 +344,7 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
     )
 
     alignment = {
-        "path": [(int(u), int(r)) for u, r in path],
+        "path": [(int(u), int(r)) for u, r in path_dedup],
         "dtw_distance": round(float(distance), 4),
         "pitch_deviations": pitch_deviations,
         "timing_offsets": timing_offsets,
@@ -284,7 +352,7 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
     }
     logger.info(
         "Alignment complete: %d pairs, DTW distance=%.2f",
-        len(path),
+        len(path_dedup),
         distance,
     )
     return alignment

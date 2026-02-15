@@ -120,6 +120,9 @@ export function useAudioEngine(options: UseAudioEngineOptions): AudioEngineState
   const pendingSeekMsRef = useRef<number | null>(null)
   const wasPlayingRef = useRef(false)
 
+  // Mirror currentTimeMs in a ref for reliable access in cleanup closures
+  const currentTimeMsRef = useRef(0)
+
   // Current track to play
   const activeTrack = useMemo(
     () => pickTrack(audioTracks, voicePart),
@@ -182,14 +185,18 @@ export function useAudioEngine(options: UseAudioEngineOptions): AudioEngineState
     return () => {
       // Save position before unloading — cleanup runs before next effect,
       // so this preserves position for seamless track switching
+      let savedMs = currentTimeMsRef.current
       try {
         const pos = howl.seek()
         if (typeof pos === 'number' && pos > 0) {
-          pendingSeekMsRef.current = pos * 1000
+          savedMs = pos * 1000
         }
         wasPlayingRef.current = howl.playing()
       } catch {
-        // Howl may already be unloaded
+        // Howl may already be unloaded — fall back to ref-based time
+      }
+      if (savedMs > 0) {
+        pendingSeekMsRef.current = savedMs
       }
       howl.unload()
       howlRef.current = null
@@ -225,6 +232,7 @@ export function useAudioEngine(options: UseAudioEngineOptions): AudioEngineState
       }
 
       setCurrentTimeMs(seekMs)
+      currentTimeMsRef.current = seekMs
       onTimeUpdateRef.current?.(seekMs)
     }, 250)
 
@@ -266,20 +274,10 @@ export function useAudioEngine(options: UseAudioEngineOptions): AudioEngineState
   }, [])
 
   const setVoicePart = useCallback((part: VoicePart) => {
-    const wasPlaying = howlRef.current?.playing() ?? false
-
+    // Just update voice part state — the Howl lifecycle cleanup/onload
+    // mechanism automatically preserves playback position when the
+    // activeTrack changes.
     setVoicePartState(part)
-    setCurrentTimeMs(0)
-
-    // Start from the beginning with the new voice
-    if (wasPlaying) {
-      setTimeout(() => {
-        if (howlRef.current) {
-          howlRef.current.seek(0)
-          howlRef.current.play()
-        }
-      }, 100)
-    }
   }, [])
 
   const setPlaybackRate = useCallback((rate: number) => {

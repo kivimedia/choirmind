@@ -4,8 +4,6 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import ScoreDial from './ScoreDial'
-import ScoreBreakdown from './ScoreBreakdown'
-import CoachingTipCard from './CoachingTipCard'
 import SectionTimeline from './SectionTimeline'
 import { useVocalRecorder } from '@/hooks/useVocalRecorder'
 import type { AudioActions } from '@/components/audio/AudioPlayer'
@@ -26,10 +24,30 @@ interface SectionScoreData {
   sectionIndex: number
   startTime: number
   endTime: number
-  overallScore: number
-  pitchScore: number
-  timingScore: number
-  dynamicsScore: number
+  overallScore: number | null
+  pitchScore: number | null
+  timingScore: number | null
+  dynamicsScore: number | null
+  refNote: string | null
+  userNote: string | null
+  noteMatch: boolean | null
+  pitchClassMatch?: boolean | null
+  octaveDiff?: number | null
+}
+
+interface NoteComparisonData {
+  noteIndex: number
+  refNote: string | null
+  refStartTime: number
+  refEndTime: number
+  userNote: string | null
+  userStartTime: number | null
+  userEndTime: number | null
+  noteMatch: boolean
+  pitchClassMatch: boolean | null
+  octaveDiff: number | null
+  centsOff: number | null
+  timingOffsetMs: number | null
 }
 
 interface ProblemArea {
@@ -52,7 +70,9 @@ interface SessionResult {
   xpEarned: number
   sectionScores: SectionScoreData[]
   problemAreas: ProblemArea[]
+  noteComparison: NoteComparisonData[]
   isolatedVocalUrl?: string
+  originalRecordingUrl?: string
   isMock?: boolean
 }
 
@@ -127,6 +147,7 @@ function formatTime(ms: number): string {
 function parsePracticeSession(ps: Record<string, unknown>): SessionResult {
   let sectionScores: SectionScoreData[] = []
   let isolatedVocalUrl: string | undefined
+  let originalRecordingUrl: string | undefined
   let isMock = false
   try {
     const rawSections = ps.sectionScores ? JSON.parse(ps.sectionScores as string) : []
@@ -135,12 +156,22 @@ function parsePracticeSession(ps: Record<string, unknown>): SessionResult {
     } else if (rawSections.sections) {
       sectionScores = rawSections.sections
       isolatedVocalUrl = rawSections.isolatedVocalUrl
+      originalRecordingUrl = rawSections.originalRecordingUrl
       isMock = !!rawSections.isMock
     }
   } catch {}
 
   let problemAreas: ProblemArea[] = []
   try { problemAreas = JSON.parse((ps.problemAreas as string) || '[]') } catch {}
+
+  // noteComparison is embedded in the sectionScores wrapper JSON
+  let noteComparison: NoteComparisonData[] = []
+  try {
+    const rawSections2 = ps.sectionScores ? JSON.parse(ps.sectionScores as string) : {}
+    if (!Array.isArray(rawSections2) && rawSections2.noteComparison) {
+      noteComparison = rawSections2.noteComparison
+    }
+  } catch {}
 
   return {
     overallScore: ps.overallScore as number,
@@ -151,7 +182,9 @@ function parsePracticeSession(ps: Record<string, unknown>): SessionResult {
     xpEarned: ps.xpEarned as number,
     sectionScores,
     problemAreas,
+    noteComparison,
     isolatedVocalUrl,
+    originalRecordingUrl,
     isMock,
   }
 }
@@ -166,11 +199,20 @@ const ANALYSIS_STAGES: { key: string; label: string }[] = [
   { key: 'isolating', label: 'מפריד קול (Demucs AI)' },
   { key: 'extracting', label: 'מחלץ מאפייני קול' },
   { key: 'loading_reference', label: 'טוען קול ייחוס' },
-  { key: 'scoring', label: 'מחשב ציון ויוצר טיפים' },
+  { key: 'scoring', label: 'מחשב ציון' },
   { key: 'saving', label: 'שומר תוצאות' },
 ]
 
-function AnalyzingProgress({ stage, onCancel }: { stage: string | null; onCancel: () => void }) {
+// When headphones skip Demucs, backend sends "converting" instead of "isolating"
+const STAGE_ALIASES: Record<string, string> = {
+  converting: 'isolating',
+}
+
+const HEADPHONES_LABELS: Record<string, string> = {
+  isolating: 'ממיר הקלטה',
+}
+
+function AnalyzingProgress({ stage, onCancel, useHeadphones }: { stage: string | null; onCancel: () => void; useHeadphones?: boolean }) {
   const [elapsed, setElapsed] = useState(0)
   const startRef = useRef(Date.now())
 
@@ -181,8 +223,10 @@ function AnalyzingProgress({ stage, onCancel }: { stage: string | null; onCancel
     return () => clearInterval(interval)
   }, [])
 
+  const resolvedStageKey = stage && STAGE_ALIASES[stage] ? STAGE_ALIASES[stage] : stage
+
   // Find active step index from server stage
-  const activeStep = ANALYSIS_STAGES.findIndex((s) => s.key === stage)
+  const activeStep = ANALYSIS_STAGES.findIndex((s) => s.key === resolvedStageKey)
   const effectiveStep = activeStep >= 0 ? activeStep : 0
 
   return (
@@ -193,6 +237,7 @@ function AnalyzingProgress({ stage, onCancel }: { stage: string | null; onCancel
           const isDone = i < effectiveStep
           const isActive = i === effectiveStep
           const isPending = i > effectiveStep
+          const label = useHeadphones && HEADPHONES_LABELS[s.key] ? HEADPHONES_LABELS[s.key] : s.label
           return (
             <div
               key={i}
@@ -217,7 +262,7 @@ function AnalyzingProgress({ stage, onCancel }: { stage: string | null; onCancel
               {isPending && (
                 <div className="h-4 w-4 shrink-0 rounded-full border-2 border-border/40" />
               )}
-              <span>{s.label}</span>
+              <span>{label}</span>
             </div>
           )
         })}
@@ -272,6 +317,12 @@ export default function ChunkRecordingPanel({
   const hasVocalsOnly = referenceVocals.some((r) => !!r.isolatedFileUrl)
   const hasMusicOnly = referenceVocals.some((r) => !!r.accompanimentFileUrl)
 
+  // Reference vocal URL for comparison playback (from the song, not the user's recording)
+  const refVocalUrl = useMemo(() => {
+    const ref = referenceVocals.find((r) => r.voicePart === voicePart) ?? referenceVocals[0]
+    return ref?.isolatedFileUrl || null
+  }, [referenceVocals, voicePart])
+
   // Pre-fetch backing track as ArrayBuffer for Web Audio API playback
   const [backingBuffer, setBackingBuffer] = useState<ArrayBuffer | null>(null)
   const [backingLoading, setBackingLoading] = useState(false)
@@ -298,9 +349,10 @@ export default function ChunkRecordingPanel({
       })
   }, [isOpen, effectiveBackingUrl, withBacking])
 
-  const recorder = useVocalRecorder(
-    withBacking && hasAudio ? { backingTrackBuffer: backingBuffer } : undefined
-  )
+  const recorder = useVocalRecorder({
+    backingTrackBuffer: withBacking && hasAudio ? backingBuffer : null,
+    useHeadphones,
+  })
 
   // Keep recording blob URL for playback in results
   const [recordingBlobUrl, setRecordingBlobUrl] = useState<string | null>(null)
@@ -663,6 +715,7 @@ export default function ChunkRecordingPanel({
         {step === 'analyzing' && (
           <AnalyzingProgress
             stage={serverStage}
+            useHeadphones={useHeadphones}
             onCancel={() => {
               if (pollRef.current) clearInterval(pollRef.current)
               setStep('ready')
@@ -681,6 +734,8 @@ export default function ChunkRecordingPanel({
                 </p>
               </div>
             )}
+
+            {/* Score + XP */}
             <div className="flex flex-col items-center gap-2">
               <ScoreDial score={result.overallScore} size="md" />
               <p className="text-xs text-text-muted">
@@ -688,116 +743,86 @@ export default function ChunkRecordingPanel({
               </p>
             </div>
 
-            <ScoreBreakdown
-              pitchScore={result.pitchScore}
-              timingScore={result.timingScore}
-              dynamicsScore={result.dynamicsScore}
-            />
-
+            {/* Per-second heatmap — which seconds were good/bad */}
             {result.sectionScores.length > 0 && (
               <SectionTimeline
                 sections={result.sectionScores.map(s => ({
-                  label: `קטע ${s.sectionIndex + 1}`,
                   score: s.overallScore,
+                  pitchScore: s.pitchScore,
+                  timingScore: s.timingScore,
+                  dynamicsScore: s.dynamicsScore,
+                  refNote: s.refNote ?? null,
+                  userNote: s.userNote ?? null,
+                  noteMatch: s.noteMatch ?? null,
+                  pitchClassMatch: s.pitchClassMatch ?? null,
+                  octaveDiff: s.octaveDiff ?? null,
                   startMs: s.startTime * 1000,
                   endMs: s.endTime * 1000,
                 }))}
-                totalDurationMs={result.sectionScores.length > 0
-                  ? result.sectionScores[result.sectionScores.length - 1].endTime * 1000
-                  : 1}
+                totalDurationMs={
+                  result.sectionScores[result.sectionScores.length - 1].endTime * 1000
+                }
+                refAudioUrl={refVocalUrl || result.isolatedVocalUrl}
+                userAudioUrl={useHeadphones ? (recordingBlobUrl || result.originalRecordingUrl) : (result.isolatedVocalUrl || recordingBlobUrl)}
+                noteComparison={result.noteComparison}
               />
             )}
 
             {/* Hidden audio elements for snippet playback */}
-            {result.isolatedVocalUrl && (
-              <audio ref={refAudioRef} src={result.isolatedVocalUrl} preload="auto" className="hidden" />
+            {(refVocalUrl || result.isolatedVocalUrl) && (
+              <audio ref={refAudioRef} src={refVocalUrl || result.isolatedVocalUrl || ''} preload="auto" className="hidden" />
             )}
-            {recordingBlobUrl && (
-              <audio ref={userAudioRef} src={recordingBlobUrl} preload="auto" className="hidden" />
-            )}
-
-            {result.problemAreas.length > 0 && (
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-foreground">{'אזורים לשיפור'}</h3>
-                {result.problemAreas.map((area, i) => {
-                  const issueLabels: Record<string, string> = {
-                    pitch: 'גובה',
-                    timing: 'תזמון',
-                    dynamics: 'דינמיקה',
-                  }
-                  return (
-                    <div key={i} className="rounded-lg border border-border bg-surface p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-foreground" dir="ltr">
-                          {area.startTime.toFixed(1)}s - {area.endTime.toFixed(1)}s
-                        </span>
-                        <div className="flex gap-1">
-                          {area.issues.map(issue => (
-                            <span key={issue} className="rounded-full bg-status-shaky/20 px-2 py-0.5 text-xs text-status-shaky">
-                              {issueLabels[issue] || issue}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                      {/* Playback buttons */}
-                      <div className="flex gap-2">
-                        {recordingBlobUrl && (
-                          <button
-                            type="button"
-                            onClick={() => playSnippet(userAudioRef, area.startTime, area.endTime)}
-                            className="flex items-center gap-1.5 rounded-full bg-border/20 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-border/40 transition-colors"
-                          >
-                            <span>{'▶'}</span>
-                            <span>{'ההקלטה שלך'}</span>
-                          </button>
-                        )}
-                        {result.isolatedVocalUrl && area.refStartTime != null && (
-                          <button
-                            type="button"
-                            onClick={() => playSnippet(refAudioRef, area.refStartTime!, area.refEndTime!)}
-                            className="flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
-                          >
-                            <span>{'▶'}</span>
-                            <span>{'איך צריך להישמע'}</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+            {(recordingBlobUrl || result.originalRecordingUrl || result.isolatedVocalUrl) && (
+              <audio
+                ref={userAudioRef}
+                src={useHeadphones ? (recordingBlobUrl || result.originalRecordingUrl!) : (result.isolatedVocalUrl || recordingBlobUrl!)}
+                preload="auto"
+                className="hidden"
+              />
             )}
 
-            {(result.isolatedVocalUrl || recordingBlobUrl) && (
+            {/* Side-by-side comparison: reference vocal vs your recording */}
+            {(refVocalUrl || recordingBlobUrl) && (
               <div className="space-y-2">
                 <h3 className="text-sm font-semibold text-foreground">{'השוואת ביצוע'}</h3>
-                {result.isolatedVocalUrl && (
+                {refVocalUrl && (
                   <div>
                     <p className="text-xs text-text-muted mb-1">{'קול ייחוס (מבודד מהשיר)'}</p>
                     <audio
                       controls
-                      src={result.isolatedVocalUrl}
+                      src={refVocalUrl}
                       className="w-full h-10"
-                      preload="none"
+                      preload="metadata"
                     />
                   </div>
                 )}
-                {recordingBlobUrl && (
+                {(useHeadphones ? (recordingBlobUrl || result.originalRecordingUrl) : result.isolatedVocalUrl || recordingBlobUrl) && (
                   <div>
-                    <p className="text-xs text-text-muted mb-1">{'ההקלטה שלך'}</p>
+                    <p className="text-xs text-text-muted mb-1">
+                      {useHeadphones ? 'ההקלטה שלך (מקור)' : 'הקול שלך (מבודד)'}
+                    </p>
                     <audio
                       controls
-                      src={recordingBlobUrl}
+                      src={useHeadphones ? (recordingBlobUrl || result.originalRecordingUrl!) : (result.isolatedVocalUrl || recordingBlobUrl!)}
                       className="w-full h-10"
-                      preload="none"
+                      preload="auto"
+                    />
+                  </div>
+                )}
+                {useHeadphones && result.isolatedVocalUrl && (
+                  <div>
+                    <p className="text-xs text-text-muted mb-1">
+                      {'ההקלטה שלך (WAV מומר - להשוואה)'}
+                    </p>
+                    <audio
+                      controls
+                      src={result.isolatedVocalUrl}
+                      className="w-full h-10"
+                      preload="metadata"
                     />
                   </div>
                 )}
               </div>
-            )}
-
-            {result.coachingTips.length > 0 && (
-              <CoachingTipCard tips={result.coachingTips} />
             )}
 
             <div className="flex gap-3">

@@ -419,7 +419,18 @@ export default function EditSongPage() {
     setImporting(true)
     setError(null)
     try {
-      const startOrder = chunks.length
+      // Delete all existing chunks first
+      for (const chunk of chunks) {
+        const delRes = await fetch(`/api/songs/${songId}/chunks/${chunk.id}`, {
+          method: 'DELETE',
+        })
+        if (!delRes.ok) {
+          const data = await delRes.json().catch(() => ({}))
+          throw new Error(data.error || 'שגיאה במחיקת קטע קיים')
+        }
+      }
+
+      // Create new chunks starting from order 0
       const newChunks: Chunk[] = []
       for (let i = 0; i < parsedPreview.length; i++) {
         const section = parsedPreview[i]
@@ -430,7 +441,7 @@ export default function EditSongPage() {
             label: section.label,
             chunkType: section.chunkType,
             lyrics: section.lyrics,
-            order: startOrder + i,
+            order: i,
           }),
         })
         if (!res.ok) {
@@ -440,7 +451,7 @@ export default function EditSongPage() {
         const { chunk } = await res.json()
         newChunks.push(chunk)
       }
-      setChunks((prev) => [...prev, ...newChunks])
+      setChunks(newChunks)
       setPasteModalOpen(false)
       setPasteText('')
       setParsedPreview([])

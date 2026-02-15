@@ -17,29 +17,318 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Note name helpers
+# ---------------------------------------------------------------------------
+
+_NOTE_NAMES = ['Do', 'Do#', 'Re', 'Re#', 'Mi', 'Fa', 'Fa#', 'Sol', 'Sol#', 'La', 'La#', 'Si']
+
+
+def _hz_to_note(freq_hz: float) -> Optional[str]:
+    """Convert a frequency in Hz to the nearest musical note name (e.g. 'A4', 'F#3')."""
+    if freq_hz is None or freq_hz <= 0 or math.isnan(freq_hz):
+        return None
+    semitones = 12 * math.log2(freq_hz / 440.0)
+    midi = round(semitones) + 69
+    return f"{_NOTE_NAMES[midi % 12]}{midi // 12 - 1}"
+
+
+def _hz_to_midi(freq_hz: float) -> Optional[int]:
+    """Convert Hz to MIDI note number."""
+    if freq_hz is None or freq_hz <= 0 or math.isnan(freq_hz):
+        return None
+    return round(12 * math.log2(freq_hz / 440.0)) + 69
+
+
+def _note_class(note_str: Optional[str]) -> Optional[str]:
+    """Extract pitch class from note string, e.g. 'A3' -> 'A', 'F#4' -> 'F#'."""
+    if not note_str:
+        return None
+    i = len(note_str)
+    while i > 0 and (note_str[i - 1].isdigit() or note_str[i - 1] == '-'):
+        i -= 1
+    return note_str[:i] if i > 0 else None
+
+
+def _octave_num(note_str: Optional[str]) -> Optional[int]:
+    """Extract octave number from note string, e.g. 'A3' -> 3, 'F#4' -> 4."""
+    if not note_str:
+        return None
+    i = len(note_str)
+    while i > 0 and (note_str[i - 1].isdigit() or note_str[i - 1] == '-'):
+        i -= 1
+    try:
+        return int(note_str[i:])
+    except (ValueError, IndexError):
+        return None
+
+
+def _median_note(pitch_values: list, pitch_times: list, t_start: float, t_end: float) -> Optional[str]:
+    """Get the dominant note in a time window from pitch arrays."""
+    freqs = []
+    for freq, t in zip(pitch_values, pitch_times):
+        if t < t_start or t >= t_end:
+            continue
+        if freq is not None and not math.isnan(freq) and freq > 0:
+            freqs.append(freq)
+    if not freqs:
+        return None
+    return _hz_to_note(float(np.median(freqs)))
+
+
+# ---------------------------------------------------------------------------
+# Note extraction & alignment (note-by-note comparison)
+# ---------------------------------------------------------------------------
+
+def _extract_notes(
+    pitch_values: list,
+    pitch_times: list,
+    onset_times: list | None = None,
+    rms_values: list | None = None,
+    rms_times: list | None = None,
+    min_duration_s: float = 0.12,
+    cents_threshold: float = 100.0,
+    max_time_s: float | None = None,
+) -> list[dict]:
+    """Extract individual note events from a pitch contour.
+
+    Groups consecutive voiced frames into notes, splitting when:
+    1. Pitch changes by more than *cents_threshold* (~semitone)
+    2. A librosa onset is detected (catches repeated same-pitch notes)
+    3. An energy dip is detected (RMS drops then rises — note re-attack)
+    Filters out notes shorter than *min_duration_s*.
+    """
+    notes: list[dict] = []
+    current_freqs: list[float] = []
+    current_start: float | None = None
+
+    # Pre-build a set of frame indices that coincide with detected onsets.
+    # This lets us split repeated same-pitch notes (e.g. Do4 Do4) that
+    # have no silence gap but DO have distinct attacks.
+    onset_frames: set[int] = set()
+    if onset_times and pitch_times:
+        pt_arr = np.array(pitch_times)
+        for ot in onset_times:
+            idx = int(np.argmin(np.abs(pt_arr - ot)))
+            # Widen tolerance to 50ms (pitch step is 20ms)
+            if abs(pitch_times[idx] - ot) < 0.05:
+                onset_frames.add(idx)
+
+    # Pre-build energy-dip detector: find pitch-frame indices where RMS
+    # dips then rises (indicating a note re-attack even when pitch is constant).
+    energy_dip_frames: set[int] = set()
+    if rms_values and rms_times and pitch_times:
+        rms_arr = np.array(rms_values)
+        rms_t_arr = np.array(rms_times)
+        pt_arr = np.array(pitch_times)
+        # Find local minima in RMS (frames where energy drops >30% from neighbors)
+        for ri in range(1, len(rms_arr) - 1):
+            prev_e = rms_arr[ri - 1]
+            cur_e = rms_arr[ri]
+            next_e = rms_arr[ri + 1]
+            if prev_e > 0 and cur_e < prev_e * 0.7 and next_e > cur_e * 1.3:
+                # Map this RMS dip time to the nearest pitch frame
+                dip_time = rms_t_arr[ri]
+                pidx = int(np.argmin(np.abs(pt_arr - dip_time)))
+                if abs(pitch_times[pidx] - dip_time) < 0.05:
+                    energy_dip_frames.add(pidx)
+
+    for frame_idx, (freq, t) in enumerate(zip(pitch_values, pitch_times)):
+        if max_time_s is not None and t > max_time_s:
+            break
+
+        is_voiced = freq is not None and not math.isnan(freq) and freq > 0
+
+        if not is_voiced:
+            # End current note if any
+            if current_freqs and current_start is not None:
+                dur = t - current_start
+                if dur >= min_duration_s:
+                    median_hz = float(np.median(current_freqs))
+                    notes.append({
+                        "startTime": round(current_start, 3),
+                        "endTime": round(t, 3),
+                        "note": _hz_to_note(median_hz),
+                        "hz": round(median_hz, 1),
+                    })
+                current_freqs = []
+                current_start = None
+            continue
+
+        if current_start is None:
+            # Start new note
+            current_start = t
+            current_freqs = [freq]
+        else:
+            # Check for onset-based or energy-dip split
+            note_dur = t - current_start
+            has_onset = frame_idx in onset_frames and note_dur >= min_duration_s
+            has_energy_dip = frame_idx in energy_dip_frames and note_dur >= min_duration_s
+
+            # Check if pitch changed significantly
+            median_hz = np.median(current_freqs)
+            if median_hz > 0:
+                cents_diff = abs(1200 * math.log2(freq / median_hz))
+            else:
+                cents_diff = 0
+
+            if cents_diff > cents_threshold or has_onset or has_energy_dip:
+                # End current note, start new one
+                dur = t - current_start
+                if dur >= min_duration_s:
+                    notes.append({
+                        "startTime": round(current_start, 3),
+                        "endTime": round(t, 3),
+                        "note": _hz_to_note(float(np.median(current_freqs))),
+                        "hz": round(float(np.median(current_freqs)), 1),
+                    })
+                current_start = t
+                current_freqs = [freq]
+            else:
+                current_freqs.append(freq)
+
+    # End last note
+    if current_freqs and current_start is not None:
+        last_t = pitch_times[-1] if pitch_times else current_start
+        dur = last_t - current_start
+        if dur >= min_duration_s:
+            median_hz = float(np.median(current_freqs))
+            notes.append({
+                "startTime": round(current_start, 3),
+                "endTime": round(last_t, 3),
+                "note": _hz_to_note(median_hz),
+                "hz": round(median_hz, 1),
+            })
+
+    return notes
+
+
+def _cents_between(hz_a: float, hz_b: float) -> float:
+    """Absolute cents distance between two frequencies."""
+    if hz_a <= 0 or hz_b <= 0:
+        return 9999.0
+    return abs(1200.0 * math.log2(hz_a / hz_b))
+
+
+# Match thresholds for note comparison (generous for amateur singers):
+# - Within 100 cents (1 semitone): "noteMatch" (green) — you hit the right note
+# - Within 150 cents but same pitch class: "pitchClassMatch" (yellow) — right note, wrong octave
+# - Beyond that: wrong note (red)
+_NOTE_MATCH_CENTS = 100.0
+
+
+def _align_notes(
+    ref_notes: list[dict],
+    user_notes: list[dict],
+    tolerance_s: float = 2.0,
+) -> list[dict]:
+    """Align reference notes to user notes sequentially.
+
+    For each reference note, find the best matching user note within
+    a timing tolerance window.  Returns a list of aligned pairs.
+
+    Matching is Hz-based (within 100 cents = 1 semitone) rather than
+    exact note-name comparison, so a singer who is 50 cents flat still
+    gets credit for hitting the right note.
+    """
+    aligned: list[dict] = []
+    u_start = 0
+
+    for r_idx, ref in enumerate(ref_notes):
+        best_match: int | None = None
+        best_time_diff = float("inf")
+
+        # Search ahead in user notes for a match
+        for j in range(u_start, min(u_start + 8, len(user_notes))):
+            time_diff = abs(user_notes[j]["startTime"] - ref["startTime"])
+            if time_diff <= tolerance_s and time_diff < best_time_diff:
+                best_match = j
+                best_time_diff = time_diff
+
+        ref_class = _note_class(ref["note"])
+        ref_oct = _octave_num(ref["note"])
+
+        if best_match is not None:
+            user = user_notes[best_match]
+            user_class = _note_class(user["note"])
+            user_oct = _octave_num(user["note"])
+
+            # Hz-based matching: compare actual frequencies, not note names
+            cents_off = _cents_between(ref.get("hz", 0), user.get("hz", 0))
+            note_match = cents_off <= _NOTE_MATCH_CENTS
+
+            # Pitch class match: same note name regardless of octave
+            pitch_class_match = (ref_class == user_class) if ref_class and user_class else None
+
+            # If Hz match but note names differ (edge case at semitone boundary),
+            # still count as pitch class match
+            if note_match and not pitch_class_match:
+                pitch_class_match = True
+
+            octave_diff = (user_oct - ref_oct) if user_oct is not None and ref_oct is not None else None
+
+            aligned.append({
+                "noteIndex": r_idx,
+                "refNote": ref["note"],
+                "refStartTime": ref["startTime"],
+                "refEndTime": ref["endTime"],
+                "userNote": user["note"],
+                "userStartTime": user["startTime"],
+                "userEndTime": user["endTime"],
+                "noteMatch": note_match,
+                "pitchClassMatch": pitch_class_match,
+                "octaveDiff": octave_diff,
+                "centsOff": round(cents_off, 1),
+                "timingOffsetMs": round((user["startTime"] - ref["startTime"]) * 1000),
+            })
+            u_start = best_match + 1
+        else:
+            aligned.append({
+                "noteIndex": r_idx,
+                "refNote": ref["note"],
+                "refStartTime": ref["startTime"],
+                "refEndTime": ref["endTime"],
+                "userNote": None,
+                "userStartTime": None,
+                "userEndTime": None,
+                "noteMatch": False,
+                "pitchClassMatch": None,
+                "octaveDiff": None,
+                "centsOff": None,
+                "timingOffsetMs": None,
+            })
+
+    return aligned
+
+
+# ---------------------------------------------------------------------------
 # Thresholds and weights
 # ---------------------------------------------------------------------------
 
-WEIGHT_PITCH = 0.50
-WEIGHT_TIMING = 0.30
-WEIGHT_DYNAMICS = 0.20
+WEIGHT_PITCH = 0.70
+WEIGHT_TIMING = 0.15
+WEIGHT_DYNAMICS = 0.15
 
-# Pitch: up to 50 cents deviation = 100 score; > 200 cents = 0
-PITCH_PERFECT_CENTS = 50.0
-PITCH_ZERO_CENTS = 200.0
+# Pitch: up to 100 cents (~semitone) = 100 score; > 400 cents = 0
+# Relaxed for amateur choir singers — singing the right note is what
+# matters most, not perfect intonation.
+PITCH_PERFECT_CENTS = 100.0
+PITCH_ZERO_CENTS = 400.0
 
-# Timing: up to 30 ms offset = 100 score; > 200 ms = 0
-TIMING_PERFECT_S = 0.030
-TIMING_ZERO_S = 0.200
+# Timing: up to 500 ms offset = 100 score; > 2s = 0
+# Very relaxed — DTW alignment has inherent jitter and amateur singers
+# are often late/early by hundreds of milliseconds.
+TIMING_PERFECT_S = 0.500
+TIMING_ZERO_S = 2.000
 
-# Dynamics: ratio 0.8-1.2 = perfect; outside 0.3-2.5 = 0
-DYNAMICS_PERFECT_LOW = 0.8
-DYNAMICS_PERFECT_HIGH = 1.2
-DYNAMICS_ZERO_LOW = 0.3
-DYNAMICS_ZERO_HIGH = 2.5
+# Dynamics: ratio 0.5-2.0 = perfect; outside 0.2-3.0 = 0
+# Very relaxed — microphone distance and gain vary wildly.
+DYNAMICS_PERFECT_LOW = 0.5
+DYNAMICS_PERFECT_HIGH = 2.0
+DYNAMICS_ZERO_LOW = 0.2
+DYNAMICS_ZERO_HIGH = 3.0
 
-# Number of equal-length sections to compute section scores
-NUM_SECTIONS = 4
+# Section granularity: 1 section per second of recording
+SECTION_DURATION_S = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -67,8 +356,35 @@ def score_recording(
         + dynamics_score * WEIGHT_DYNAMICS
     )
 
-    section_scores = _compute_section_scores(alignment, user_features)
+    section_scores = _compute_section_scores(alignment, user_features, ref_features)
     problem_areas = _identify_problem_areas(alignment, user_features, ref_features)
+
+    # Note-by-note comparison
+    note_comparison: list[dict] = []
+    if ref_features:
+        user_dur = user_features.get("duration_s", 0)
+        max_ref_t = user_dur * 1.2 + 5.0
+
+        ref_notes = _extract_notes(
+            ref_features.get("pitch_values", []),
+            ref_features.get("pitch_times", []),
+            onset_times=ref_features.get("onset_times"),
+            rms_values=ref_features.get("rms_values"),
+            rms_times=ref_features.get("rms_times"),
+            max_time_s=max_ref_t,
+        )
+        user_notes = _extract_notes(
+            user_features.get("pitch_values", []),
+            user_features.get("pitch_times", []),
+            onset_times=user_features.get("onset_times"),
+            rms_values=user_features.get("rms_values"),
+            rms_times=user_features.get("rms_times"),
+        )
+        note_comparison = _align_notes(ref_notes, user_notes)
+        logger.info(
+            "Note comparison: %d ref notes, %d user notes, %d aligned pairs",
+            len(ref_notes), len(user_notes), len(note_comparison),
+        )
 
     result = {
         "overallScore": round(overall, 1),
@@ -77,6 +393,7 @@ def score_recording(
         "dynamicsScore": round(dynamics_score, 1),
         "sectionScores": section_scores,
         "problemAreas": problem_areas[:3],
+        "noteComparison": note_comparison,
     }
     logger.info(
         "Scored recording: overall=%.1f  pitch=%.1f  timing=%.1f  dynamics=%.1f",
@@ -154,19 +471,24 @@ def _score_dynamics(alignment: dict) -> float:
 # Section scores
 # ---------------------------------------------------------------------------
 
-def _compute_section_scores(alignment: dict, user_features: dict) -> list[dict]:
-    """Split the user recording timeline into NUM_SECTIONS equal segments
+def _compute_section_scores(alignment: dict, user_features: dict, ref_features: dict | None = None) -> list[dict]:
+    """Split the user recording timeline into 1-second segments
     and compute sub-scores for each."""
     user_times = user_features.get("pitch_times", [])
     if not user_times:
         return []
 
+    user_pitch_vals = user_features.get("pitch_values", [])
+    ref_pitch_vals = ref_features.get("pitch_values", []) if ref_features else []
+    ref_pitch_times = ref_features.get("pitch_times", []) if ref_features else []
+
     duration = user_times[-1]
-    section_dur = duration / NUM_SECTIONS
+    num_sections = max(1, round(duration / SECTION_DURATION_S))
+    section_dur = duration / num_sections
     path = alignment["path"]
 
     sections = []
-    for sec_idx in range(NUM_SECTIONS):
+    for sec_idx in range(num_sections):
         t_start = sec_idx * section_dur
         t_end = (sec_idx + 1) * section_dur
 
@@ -199,19 +521,50 @@ def _compute_section_scores(alignment: dict, user_features: dict) -> list[dict]:
             "energy_ratios": sec_energy_rats,
         }
 
-        p = _score_pitch(sec_alignment)
-        t = _score_timing(sec_alignment)
-        d = _score_dynamics(sec_alignment)
-        overall = p * WEIGHT_PITCH + t * WEIGHT_TIMING + d * WEIGHT_DYNAMICS
+        # Compute notes for this second
+        user_note = _median_note(user_pitch_vals, user_times, t_start, t_end)
+        ref_note = _median_note(ref_pitch_vals, ref_pitch_times, t_start, t_end)
+
+        # If no voiced pitch data in this second, mark as quiet
+        has_voiced = len(sec_pitch_devs) > 0
+
+        if has_voiced:
+            p = _score_pitch(sec_alignment)
+            t = _score_timing(sec_alignment) if sec_timing_offs else 0.0
+            d = _score_dynamics(sec_alignment)
+            overall = p * WEIGHT_PITCH + t * WEIGHT_TIMING + d * WEIGHT_DYNAMICS
+        else:
+            p = None
+            t = None
+            d = None
+            overall = None
+
+        # Octave-aware note comparison
+        note_match = (ref_note == user_note) if ref_note and user_note else None
+        pitch_class_match = None
+        octave_diff = None
+        if ref_note and user_note:
+            ref_cls = _note_class(ref_note)
+            user_cls = _note_class(user_note)
+            pitch_class_match = (ref_cls == user_cls)
+            r_oct = _octave_num(ref_note)
+            u_oct = _octave_num(user_note)
+            if r_oct is not None and u_oct is not None:
+                octave_diff = u_oct - r_oct
 
         sections.append({
             "sectionIndex": sec_idx,
             "startTime": round(t_start, 2),
             "endTime": round(t_end, 2),
-            "overallScore": round(overall, 1),
-            "pitchScore": round(p, 1),
-            "timingScore": round(t, 1),
-            "dynamicsScore": round(d, 1),
+            "overallScore": round(overall, 1) if overall is not None else None,
+            "pitchScore": round(p, 1) if p is not None else None,
+            "timingScore": round(t, 1) if t is not None else None,
+            "dynamicsScore": round(d, 1) if d is not None else None,
+            "refNote": ref_note,
+            "userNote": user_note,
+            "noteMatch": note_match,
+            "pitchClassMatch": pitch_class_match,
+            "octaveDiff": octave_diff,
         })
 
     return sections
@@ -399,11 +752,12 @@ def score_standalone(user_features: dict) -> dict:
     duration = user_features.get("duration_s", 0)
     section_scores: list[dict] = []
     if duration > 0:
-        section_dur = duration / NUM_SECTIONS
+        num_sections = max(1, round(duration / SECTION_DURATION_S))
+        section_dur = duration / num_sections
         rms_times = np.array(user_features["rms_times"])
         pitch_times = np.array(user_features["pitch_times"])
 
-        for sec_idx in range(NUM_SECTIONS):
+        for sec_idx in range(num_sections):
             t_start = sec_idx * section_dur
             t_end = (sec_idx + 1) * section_dur
 
