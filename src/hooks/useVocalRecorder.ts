@@ -173,7 +173,7 @@ export function useVocalRecorder(options?: UseVocalRecorderOptions): VocalRecord
           : 'שגיאה בהפעלת ההקלטה'
       setError(message)
     }
-  }, [updateAnalyser, options?.backingTrackBuffer])
+  }, [updateAnalyser, options?.backingTrackBuffer, options?.deviceId, options?.useHeadphones])
 
   const stopRecording = useCallback(() => {
     // Stop backing track
