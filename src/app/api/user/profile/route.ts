@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
         voicePart: true,
         role: true,
         shabbatMode: true,
+        scoringLevel: true,
         xp: true,
         currentStreak: true,
         longestStreak: true,
@@ -73,7 +74,18 @@ export async function PUT(request: NextRequest) {
 
     const userId = session.user.id
     const body = await request.json()
-    const { name, voicePart, locale, shabbatMode } = body
+    const { name, voicePart, locale, shabbatMode, scoringLevel } = body
+
+    // Validate scoring level if provided
+    const validScoringLevels = ['choir', 'semi_pro', 'pro']
+    if (scoringLevel !== undefined && !validScoringLevels.includes(scoringLevel)) {
+      return NextResponse.json(
+        {
+          error: `Invalid scoring level. Must be one of: ${validScoringLevels.join(', ')}`,
+        },
+        { status: 400 }
+      )
+    }
 
     // Validate voice part if provided
     const validVoiceParts = [
@@ -111,6 +123,7 @@ export async function PUT(request: NextRequest) {
         ...(voicePart !== undefined && { voicePart }),
         ...(locale !== undefined && { locale }),
         ...(shabbatMode !== undefined && { shabbatMode }),
+        ...(scoringLevel !== undefined && { scoringLevel }),
       },
       select: {
         id: true,
@@ -121,6 +134,7 @@ export async function PUT(request: NextRequest) {
         voicePart: true,
         role: true,
         shabbatMode: true,
+        scoringLevel: true,
         xp: true,
         currentStreak: true,
         longestStreak: true,

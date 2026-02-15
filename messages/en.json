@@ -269,6 +269,16 @@
     "quick_learner": "Quick Learner",
     "choir_ready": "Choir Ready"
   },
+  "scoringLevel": {
+    "title": "Scoring Level",
+    "description": "Choose your scoring sensitivity level",
+    "choir": "Choir Singer",
+    "choirDesc": "Forgiving — suited for amateur choir singing",
+    "semi_pro": "Semi-Professional",
+    "semi_proDesc": "Balanced — higher accuracy expectations",
+    "pro": "Professional",
+    "proDesc": "Strict — professional performance standard"
+  },
   "choirManage": {
     "title": "Manage Choir",
     "choirSettings": "Choir Settings",

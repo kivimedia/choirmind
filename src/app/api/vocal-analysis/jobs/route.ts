@@ -175,6 +175,13 @@ export async function POST(request: NextRequest) {
       },
     })
 
+    // Read user's scoring level for the vocal service
+    const userRecord = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { scoringLevel: true },
+    })
+    const scoringLevel = userRecord?.scoringLevel ?? 'choir'
+
     // Create PENDING VocalAnalysisJob
     const job = await prisma.vocalAnalysisJob.create({
       data: {
@@ -208,6 +215,7 @@ export async function POST(request: NextRequest) {
           recordingS3Key,
           recordingDurationMs,
           useHeadphones: job.useHeadphones,
+          scoringLevel,
         }),
       }).then(async (res) => {
         clearTimeout(timeout)

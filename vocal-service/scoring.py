@@ -214,11 +214,7 @@ def _cents_between(hz_a: float, hz_b: float) -> float:
     return abs(((raw + 600) % 1200) - 600)
 
 
-# Match thresholds for note comparison (generous for amateur singers):
-# - Within 80 cents: "noteMatch" (green) — you hit the right note
-# - Same pitch class different octave: also green (octave-tolerant)
-# - Beyond that: wrong note (red)
-# 80 cents is generous but excludes a full semitone (100 cents) which is a wrong note.
+# Default match threshold for note comparison (used when no level provided)
 _NOTE_MATCH_CENTS = 100.0
 
 
@@ -229,6 +225,7 @@ def _align_notes(
     user_pitch_times: list | None = None,
     ref_pitch_times: list | None = None,
     tolerance_s: float = 1.5,
+    note_match_cents: float = _NOTE_MATCH_CENTS,
 ) -> list[dict]:
     """Align reference notes to user notes using global sequence alignment (DP).
 
@@ -333,7 +330,7 @@ def _align_notes(
             user_oct = _octave_num(user["note"])
 
             cents_off = _cents_between(ref.get("hz", 0), user.get("hz", 0))
-            note_match = cents_off <= _NOTE_MATCH_CENTS
+            note_match = cents_off <= note_match_cents
 
             pitch_class_match = (ref_class == user_class) if ref_class and user_class else None
             if note_match and not pitch_class_match:
@@ -382,20 +379,49 @@ WEIGHT_PITCH = 0.70
 WEIGHT_TIMING = 0.15
 WEIGHT_DYNAMICS = 0.15
 
-# Pitch: up to 100 cents (~semitone) = 100 score; > 400 cents = 0
-# Relaxed for amateur choir singers — singing the right note is what
-# matters most, not perfect intonation.
+# Level-based scoring thresholds: choir (generous), semi_pro, pro (strict)
+LEVEL_THRESHOLDS = {
+    "choir": {
+        "pitch_perfect_cents": 150.0,
+        "pitch_zero_cents": 400.0,
+        "timing_perfect_s": 0.500,
+        "timing_zero_s": 2.000,
+        "dynamics_perfect_low": 0.5,
+        "dynamics_perfect_high": 2.0,
+        "dynamics_zero_low": 0.2,
+        "dynamics_zero_high": 3.0,
+        "note_match_cents": 100.0,
+    },
+    "semi_pro": {
+        "pitch_perfect_cents": 80.0,
+        "pitch_zero_cents": 250.0,
+        "timing_perfect_s": 0.250,
+        "timing_zero_s": 1.000,
+        "dynamics_perfect_low": 0.65,
+        "dynamics_perfect_high": 1.6,
+        "dynamics_zero_low": 0.3,
+        "dynamics_zero_high": 2.5,
+        "note_match_cents": 70.0,
+    },
+    "pro": {
+        "pitch_perfect_cents": 40.0,
+        "pitch_zero_cents": 150.0,
+        "timing_perfect_s": 0.100,
+        "timing_zero_s": 0.500,
+        "dynamics_perfect_low": 0.75,
+        "dynamics_perfect_high": 1.4,
+        "dynamics_zero_low": 0.4,
+        "dynamics_zero_high": 2.0,
+        "note_match_cents": 50.0,
+    },
+}
+
+# Default thresholds (choir level) — used by module-level constants for
+# backward compatibility and standalone scoring.
 PITCH_PERFECT_CENTS = 150.0
 PITCH_ZERO_CENTS = 400.0
-
-# Timing: up to 500 ms offset = 100 score; > 2s = 0
-# Very relaxed — DTW alignment has inherent jitter and amateur singers
-# are often late/early by hundreds of milliseconds.
 TIMING_PERFECT_S = 0.500
 TIMING_ZERO_S = 2.000
-
-# Dynamics: ratio 0.5-2.0 = perfect; outside 0.2-3.0 = 0
-# Very relaxed — microphone distance and gain vary wildly.
 DYNAMICS_PERFECT_LOW = 0.5
 DYNAMICS_PERFECT_HIGH = 2.0
 DYNAMICS_ZERO_LOW = 0.2
@@ -413,16 +439,23 @@ def score_recording(
     user_features: dict,
     ref_features: dict,
     alignment: dict,
+    scoring_level: str = "choir",
 ) -> dict:
     """Score a user recording against a reference.
+
+    Args:
+        scoring_level: One of "choir", "semi_pro", "pro". Controls threshold
+            strictness for pitch, timing, and dynamics scoring.
 
     Returns:
         dict with overallScore, pitchScore, timingScore, dynamicsScore,
         sectionScores, and problemAreas (up to 3).
     """
-    pitch_score = _score_pitch(alignment)
-    timing_score = _score_timing(alignment)
-    dynamics_score = _score_dynamics(alignment)
+    th = LEVEL_THRESHOLDS.get(scoring_level, LEVEL_THRESHOLDS["choir"])
+
+    pitch_score = _score_pitch(alignment, th)
+    timing_score = _score_timing(alignment, th)
+    dynamics_score = _score_dynamics(alignment, th)
 
     overall = (
         pitch_score * WEIGHT_PITCH
@@ -430,8 +463,8 @@ def score_recording(
         + dynamics_score * WEIGHT_DYNAMICS
     )
 
-    section_scores = _compute_section_scores(alignment, user_features, ref_features)
-    problem_areas = _identify_problem_areas(alignment, user_features, ref_features)
+    section_scores = _compute_section_scores(alignment, user_features, ref_features, th)
+    problem_areas = _identify_problem_areas(alignment, user_features, ref_features, th=th)
 
     # Note-by-note comparison
     note_comparison: list[dict] = []
@@ -459,6 +492,7 @@ def score_recording(
             alignment=alignment,
             user_pitch_times=user_features.get("pitch_times", []),
             ref_pitch_times=ref_features.get("pitch_times", []),
+            note_match_cents=th["note_match_cents"],
         )
         logger.info(
             "Note comparison: %d ref notes, %d user notes, %d aligned pairs",
@@ -473,13 +507,15 @@ def score_recording(
         "sectionScores": section_scores,
         "problemAreas": problem_areas[:3],
         "noteComparison": note_comparison,
+        "scoringLevel": scoring_level,
     }
     logger.info(
-        "Scored recording: overall=%.1f  pitch=%.1f  timing=%.1f  dynamics=%.1f",
+        "Scored recording: overall=%.1f  pitch=%.1f  timing=%.1f  dynamics=%.1f  level=%s",
         result["overallScore"],
         result["pitchScore"],
         result["timingScore"],
         result["dynamicsScore"],
+        scoring_level,
     )
     return result
 
@@ -488,8 +524,10 @@ def score_recording(
 # Sub-scorers
 # ---------------------------------------------------------------------------
 
-def _score_pitch(alignment: dict) -> float:
+def _score_pitch(alignment: dict, th: dict | None = None) -> float:
     """Score pitch accuracy as 0-100 based on cent deviations."""
+    perfect = th["pitch_perfect_cents"] if th else PITCH_PERFECT_CENTS
+    zero = th["pitch_zero_cents"] if th else PITCH_ZERO_CENTS
     deviations = alignment["pitch_deviations"]
     scores = []
     for dev in deviations:
@@ -497,51 +535,57 @@ def _score_pitch(alignment: dict) -> float:
             # Unvoiced frame -- skip
             continue
         abs_dev = abs(dev)
-        if abs_dev <= PITCH_PERFECT_CENTS:
+        if abs_dev <= perfect:
             scores.append(100.0)
-        elif abs_dev >= PITCH_ZERO_CENTS:
+        elif abs_dev >= zero:
             scores.append(0.0)
         else:
             # Linear interpolation between perfect and zero
-            ratio = (abs_dev - PITCH_PERFECT_CENTS) / (PITCH_ZERO_CENTS - PITCH_PERFECT_CENTS)
+            ratio = (abs_dev - perfect) / (zero - perfect)
             scores.append(100.0 * (1.0 - ratio))
     return float(np.mean(scores)) if scores else 50.0
 
 
-def _score_timing(alignment: dict) -> float:
+def _score_timing(alignment: dict, th: dict | None = None) -> float:
     """Score timing accuracy as 0-100 based on time offsets."""
+    perfect = th["timing_perfect_s"] if th else TIMING_PERFECT_S
+    zero = th["timing_zero_s"] if th else TIMING_ZERO_S
     offsets = alignment["timing_offsets"]
     scores = []
     for off in offsets:
         abs_off = abs(off)
-        if abs_off <= TIMING_PERFECT_S:
+        if abs_off <= perfect:
             scores.append(100.0)
-        elif abs_off >= TIMING_ZERO_S:
+        elif abs_off >= zero:
             scores.append(0.0)
         else:
-            ratio = (abs_off - TIMING_PERFECT_S) / (TIMING_ZERO_S - TIMING_PERFECT_S)
+            ratio = (abs_off - perfect) / (zero - perfect)
             scores.append(100.0 * (1.0 - ratio))
     return float(np.mean(scores)) if scores else 50.0
 
 
-def _score_dynamics(alignment: dict) -> float:
+def _score_dynamics(alignment: dict, th: dict | None = None) -> float:
     """Score dynamics match as 0-100 based on energy ratios."""
+    perf_low = th["dynamics_perfect_low"] if th else DYNAMICS_PERFECT_LOW
+    perf_high = th["dynamics_perfect_high"] if th else DYNAMICS_PERFECT_HIGH
+    zero_low = th["dynamics_zero_low"] if th else DYNAMICS_ZERO_LOW
+    zero_high = th["dynamics_zero_high"] if th else DYNAMICS_ZERO_HIGH
     ratios = alignment["energy_ratios"]
     scores = []
     for ratio in ratios:
         if ratio is None:
             continue
-        if DYNAMICS_PERFECT_LOW <= ratio <= DYNAMICS_PERFECT_HIGH:
+        if perf_low <= ratio <= perf_high:
             scores.append(100.0)
-        elif ratio < DYNAMICS_ZERO_LOW or ratio > DYNAMICS_ZERO_HIGH:
+        elif ratio < zero_low or ratio > zero_high:
             scores.append(0.0)
-        elif ratio < DYNAMICS_PERFECT_LOW:
+        elif ratio < perf_low:
             # Too quiet
-            frac = (ratio - DYNAMICS_ZERO_LOW) / (DYNAMICS_PERFECT_LOW - DYNAMICS_ZERO_LOW)
+            frac = (ratio - zero_low) / (perf_low - zero_low)
             scores.append(100.0 * frac)
         else:
             # Too loud
-            frac = (DYNAMICS_ZERO_HIGH - ratio) / (DYNAMICS_ZERO_HIGH - DYNAMICS_PERFECT_HIGH)
+            frac = (zero_high - ratio) / (zero_high - perf_high)
             scores.append(100.0 * frac)
     return float(np.mean(scores)) if scores else 50.0
 
@@ -550,7 +594,7 @@ def _score_dynamics(alignment: dict) -> float:
 # Section scores
 # ---------------------------------------------------------------------------
 
-def _compute_section_scores(alignment: dict, user_features: dict, ref_features: dict | None = None) -> list[dict]:
+def _compute_section_scores(alignment: dict, user_features: dict, ref_features: dict | None = None, th: dict | None = None) -> list[dict]:
     """Split the user recording timeline into 1-second segments
     and compute sub-scores for each."""
     user_times = user_features.get("pitch_times", [])
@@ -608,9 +652,9 @@ def _compute_section_scores(alignment: dict, user_features: dict, ref_features: 
         has_voiced = len(sec_pitch_devs) > 0
 
         if has_voiced:
-            p = _score_pitch(sec_alignment)
-            t = _score_timing(sec_alignment) if sec_timing_offs else 0.0
-            d = _score_dynamics(sec_alignment)
+            p = _score_pitch(sec_alignment, th)
+            t = _score_timing(sec_alignment, th) if sec_timing_offs else 0.0
+            d = _score_dynamics(sec_alignment, th)
             overall = p * WEIGHT_PITCH + t * WEIGHT_TIMING + d * WEIGHT_DYNAMICS
         else:
             p = None
@@ -658,6 +702,7 @@ def _identify_problem_areas(
     user_features: dict,
     ref_features: dict | None = None,
     window_s: float = 2.0,
+    th: dict | None = None,
 ) -> list[dict]:
     """Identify up to 3 worst time windows in the recording.
 
@@ -711,19 +756,25 @@ def _identify_problem_areas(
             avg_ratio = float(np.mean(w_dynamics)) if w_dynamics else 1.0
 
             # Determine dominant issue
+            _pp = th["pitch_perfect_cents"] if th else PITCH_PERFECT_CENTS
+            _tp = th["timing_perfect_s"] if th else TIMING_PERFECT_S
+            _dp_low = th["dynamics_perfect_low"] if th else DYNAMICS_PERFECT_LOW
+            _dp_high = th["dynamics_perfect_high"] if th else DYNAMICS_PERFECT_HIGH
+            _pz = th["pitch_zero_cents"] if th else PITCH_ZERO_CENTS
+            _tz = th["timing_zero_s"] if th else TIMING_ZERO_S
             issues = []
-            if avg_dev > PITCH_PERFECT_CENTS * 1.5:
+            if avg_dev > _pp * 1.5:
                 issues.append("pitch")
-            if avg_off > TIMING_PERFECT_S * 3:
+            if avg_off > _tp * 3:
                 issues.append("timing")
-            if avg_ratio < DYNAMICS_PERFECT_LOW * 0.7 or avg_ratio > DYNAMICS_PERFECT_HIGH * 1.5:
+            if avg_ratio < _dp_low * 0.7 or avg_ratio > _dp_high * 1.5:
                 issues.append("dynamics")
 
             if issues:
                 # Combined badness metric (higher = worse)
                 badness = (
-                    avg_dev / PITCH_ZERO_CENTS * WEIGHT_PITCH
-                    + avg_off / TIMING_ZERO_S * WEIGHT_TIMING
+                    avg_dev / _pz * WEIGHT_PITCH
+                    + avg_off / _tz * WEIGHT_TIMING
                     + abs(1.0 - avg_ratio) * WEIGHT_DYNAMICS
                 )
                 entry = {

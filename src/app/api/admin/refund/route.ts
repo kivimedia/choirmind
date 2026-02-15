@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/admin/refund — issue a refund
+// POST /api/admin/refund — issue a refund and deduct purchased minutes
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -65,15 +65,18 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { chargeId, amount, reason } = body as {
+    const { chargeId, amount, reason, userId } = body as {
       chargeId: string
       amount?: number
       reason?: string
+      userId?: string
     }
 
     if (!chargeId) {
       return NextResponse.json({ error: 'chargeId required' }, { status: 400 })
     }
+
+    const stripe = getStripe()
 
     const refundParams: Stripe.RefundCreateParams = {
       charge: chargeId,
@@ -84,13 +87,83 @@ export async function POST(request: NextRequest) {
       refundParams.amount = amount
     }
 
-    const refund = await getStripe().refunds.create(refundParams)
+    const refund = await stripe.refunds.create(refundParams)
+
+    // --- Deduct purchased minutes from user quota ---
+    let deductedSeconds = 0
+    try {
+      // Resolve user: prefer explicit userId, fall back to charge's customer
+      let targetUserId = userId
+      const charge = await stripe.charges.retrieve(chargeId)
+
+      if (!targetUserId && charge.customer) {
+        const user = await prisma.user.findFirst({
+          where: { stripeCustomerId: charge.customer as string },
+          select: { id: true },
+        })
+        targetUserId = user?.id
+      }
+
+      if (targetUserId) {
+        const quota = await prisma.userVocalQuota.findUnique({
+          where: { userId: targetUserId },
+        })
+
+        if (quota) {
+          // Determine how many seconds this charge originally purchased
+          let purchasedSeconds = 0
+
+          if (charge.payment_intent) {
+            const sessions = await stripe.checkout.sessions.list({
+              payment_intent: charge.payment_intent as string,
+              limit: 1,
+            })
+            const cs = sessions.data[0]
+            if (cs?.metadata?.seconds) {
+              // Top-up purchase
+              purchasedSeconds = parseInt(cs.metadata.seconds, 10)
+            } else if (cs?.metadata?.monthlySeconds) {
+              // Subscription first payment
+              purchasedSeconds = parseInt(cs.metadata.monthlySeconds, 10)
+            }
+          }
+
+          // Fallback for renewal invoices (no checkout session)
+          if (purchasedSeconds === 0 && quota.monthlySecondsLimit) {
+            purchasedSeconds = quota.monthlySecondsLimit
+          }
+
+          if (purchasedSeconds > 0) {
+            // For partial refunds, scale proportionally
+            const isPartial = amount && amount > 0 && amount < charge.amount
+            const secondsToDeduct = isPartial
+              ? Math.ceil(purchasedSeconds * amount / charge.amount)
+              : purchasedSeconds
+
+            // Clamp so purchasedSeconds doesn't go below 0
+            deductedSeconds = Math.min(secondsToDeduct, quota.purchasedSeconds)
+            if (deductedSeconds > 0) {
+              await prisma.userVocalQuota.update({
+                where: { userId: targetUserId },
+                data: { purchasedSeconds: { decrement: deductedSeconds } },
+              })
+              console.log(
+                `[admin/refund] Deducted ${deductedSeconds}s from user ${targetUserId} (charge ${chargeId})`,
+              )
+            }
+          }
+        }
+      }
+    } catch (quotaErr) {
+      console.error('[admin/refund] Failed to deduct minutes after refund:', quotaErr)
+    }
 
     return NextResponse.json({
       id: refund.id,
       amount: refund.amount,
       currency: refund.currency,
       status: refund.status,
+      deductedSeconds,
     })
   } catch (error) {
     console.error('[admin/refund POST]', error)

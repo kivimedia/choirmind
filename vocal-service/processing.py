@@ -193,9 +193,10 @@ def extract_features(audio_path: str, sr: int = 22050) -> dict:
 def align_features(user_features: dict, ref_features: dict) -> dict:
     """Align a user recording to a reference using Dynamic Time Warping.
 
-    The alignment is performed on pitch contours.  Unvoiced frames (NaN)
-    are temporarily set to 0 for DTW distance computation but flagged
-    separately so the scorer can handle them.
+    Uses a 3-layer defense against alignment drift:
+      Layer 1: Detect and trim leading noise/gibberish before DTW
+      Layer 2: Multi-feature DTW (pitch + voicing + energy) instead of pitch-only
+      Layer 3: Post-DTW path sanity check (logging only for V1)
 
     Args:
         user_features: Feature dict from extract_features (user recording).
@@ -208,15 +209,14 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
             - pitch_deviations: per-aligned-pair pitch deviation in cents
             - timing_offsets:  per-aligned-pair time offset in seconds
             - energy_ratios:   per-aligned-pair energy ratio (user/ref)
+            - path_sanity:     dict with drift detection results
     """
     logger.info("Running DTW alignment")
 
     user_dur = user_features.get("duration_s", 0)
     ref_dur = ref_features.get("duration_s", 0)
 
-    # Trim reference to user duration + 20% margin to avoid aligning a 20s
-    # recording against a 3-minute reference (causes huge DTW matrix and
-    # meaningless alignment in the unused tail).
+    # --- (a) Trim reference to user duration + 20% margin ---
     max_ref_dur = user_dur * 1.2 + 5.0  # e.g. 20s recording → 29s of ref
     ref_pitch_raw = ref_features["pitch_values"]
     ref_times_raw = ref_features.get("pitch_times", [])
@@ -233,27 +233,17 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
     else:
         cut_idx = None
 
+    # --- (b) Build pitch arrays ---
     user_pitch = np.array(user_features["pitch_values"])
     ref_pitch = np.array(ref_pitch_raw)
 
-    # Replace NaN with 0 for DTW (we track voicing separately)
-    user_pitch_dtw = np.nan_to_num(user_pitch, nan=0.0)
-    ref_pitch_dtw = np.nan_to_num(ref_pitch, nan=0.0)
-
-    # Reshape for FastDTW (needs 2-D)
-    user_seq = user_pitch_dtw.reshape(-1, 1)
-    ref_seq = ref_pitch_dtw.reshape(-1, 1)
-
-    distance, path = fastdtw(user_seq, ref_seq, dist=euclidean, radius=50)
-
-    # Pre-compute per-pair deviations (use trimmed ref arrays)
+    # --- (c) Build time and RMS arrays (moved before onset detection) ---
     user_times = np.array(user_features["pitch_times"])
     ref_times = np.array(ref_times_raw[:cut_idx] if cut_idx else ref_times_raw)
 
     user_rms = np.array(user_features["rms_values"])
     user_rms_times = np.array(user_features["rms_times"])
 
-    # Trim ref RMS arrays to the same time window
     ref_rms_raw = ref_features["rms_values"]
     ref_rms_times_raw = ref_features["rms_times"]
     if cut_idx and ref_rms_times_raw:
@@ -267,9 +257,62 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
         ref_rms = np.array(ref_rms_raw)
         ref_rms_times = np.array(ref_rms_times_raw)
 
+    # --- (d) Layer 1: Detect singing onset (leading noise trimming) ---
+    singing_onset = _detect_singing_onset(
+        user_pitch, user_times, ref_pitch, ref_times,
+    )
+
+    # --- (e) Trim user arrays if singing_onset > 0.2s ---
+    user_frame_offset = 0
+    if singing_onset > 0.2 and len(user_times) > 0:
+        trim_idx = next(
+            (i for i, t in enumerate(user_times) if t >= singing_onset),
+            0,
+        )
+        if 0 < trim_idx < len(user_pitch):
+            user_frame_offset = trim_idx
+            user_pitch_dtw = user_pitch[trim_idx:]
+            user_times_dtw = user_times[trim_idx:]
+            logger.info(
+                "Layer 1: Trimmed %d leading frames (%.2fs) — singing onset at %.2fs",
+                trim_idx, singing_onset, singing_onset,
+            )
+        else:
+            user_pitch_dtw = user_pitch
+            user_times_dtw = user_times
+    else:
+        user_pitch_dtw = user_pitch
+        user_times_dtw = user_times
+        if singing_onset > 0:
+            logger.info(
+                "Layer 1: Singing onset at %.2fs (below 0.2s threshold, no trim)",
+                singing_onset,
+            )
+        else:
+            logger.info("Layer 1: Singing starts immediately, no trimming needed")
+
+    # --- (f) Layer 2: Build 3D feature vectors [log_pitch, voicing, rms] ---
+    user_rms_dtw_interp = np.interp(user_times_dtw, user_rms_times, user_rms)
+    ref_rms_interp = np.interp(ref_times, ref_rms_times, ref_rms)
+
+    user_seq = _build_dtw_features(user_pitch_dtw, user_rms_dtw_interp)
+    ref_seq = _build_dtw_features(ref_pitch, ref_rms_interp)
+
+    # --- (g) Run FastDTW on 3D vectors ---
+    distance, path = fastdtw(user_seq, ref_seq, dist=euclidean, radius=50)
+
+    # --- (h) Shift path indices back by user_frame_offset ---
+    if user_frame_offset > 0:
+        path = [(u_idx + user_frame_offset, r_idx) for u_idx, r_idx in path]
+        logger.info(
+            "Shifted DTW path indices by +%d to restore original coordinates",
+            user_frame_offset,
+        )
+
+    # --- (i) Compute per-pair deviations (uses original full arrays) ---
     pitch_deviations = []  # in cents
     raw_timing_offsets = []  # in seconds (before normalization)
-    energy_ratios = []     # user/ref ratio
+    energy_ratios = []  # user/ref ratio
 
     for u_idx, r_idx in path:
         # -- Pitch deviation in cents --
@@ -289,7 +332,6 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
         raw_timing_offsets.append(float(u_t - r_t))
 
         # -- Energy ratio --
-        # Map pitch-frame index to nearest RMS frame
         u_rms_idx = _nearest_idx(user_rms_times, u_t) if u_idx < len(user_times) else 0
         r_rms_idx = _nearest_idx(ref_rms_times, r_t) if r_idx < len(ref_times) else 0
 
@@ -301,17 +343,15 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
         else:
             energy_ratios.append(None)
 
-    # --- Deduplicate path by user index ---
-    # DTW with mismatched lengths (e.g. 19s user vs 3min ref) creates many
-    # ref frames bunched onto single user frames.  Keep only one pair per
-    # unique user index (the one with the smallest pitch deviation) so that
-    # timing offsets reflect true 1:1 alignment quality.
+    # --- (j) Deduplicate path by user index ---
+    # DTW with mismatched lengths creates many ref frames bunched onto single
+    # user frames.  Keep only one pair per unique user index (smallest pitch
+    # deviation) so timing offsets reflect true 1:1 alignment quality.
     dedup: dict[int, int] = {}  # u_idx -> best pair_idx
     for pair_idx, (u_idx, r_idx) in enumerate(path):
         if u_idx not in dedup:
             dedup[u_idx] = pair_idx
         else:
-            # Keep the pair with the smaller pitch deviation
             existing_dev = pitch_deviations[dedup[u_idx]]
             current_dev = pitch_deviations[pair_idx]
             ex_abs = abs(existing_dev) if existing_dev is not None else 999
@@ -330,11 +370,9 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
         len(path), len(keep),
     )
 
-    # Normalize timing offsets: subtract the median baseline offset.
-    # When comparing a chunk (starts at 0s) against a full-song reference
-    # (where the matching section starts at e.g. 28s), the raw offsets are
-    # all ~-28s. The median captures this constant shift; deviations from
-    # the median represent actual timing errors (early/late entries).
+    # --- (k) Normalize timing offsets ---
+    # Subtract the median baseline offset (constant shift from chunk start
+    # vs full-song reference position).
     raw_arr = np.array(raw_timing_offsets)
     baseline = float(np.median(raw_arr))
     timing_offsets = [round(float(v - baseline), 4) for v in raw_timing_offsets]
@@ -343,17 +381,34 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
         baseline,
     )
 
+    # --- (l) Layer 3: Post-DTW path sanity check (diagnostic) ---
+    path_sanity = _check_path_sanity(path_dedup, user_times, ref_times)
+    if not path_sanity["is_sane"]:
+        logger.warning(
+            "Layer 3: DTW path drift detected! avg_slope=%.3f, %d drift regions: %s",
+            path_sanity["avg_slope"],
+            len(path_sanity["drift_regions"]),
+            path_sanity["drift_regions"],
+        )
+    else:
+        logger.info(
+            "Layer 3: DTW path sanity OK (avg_slope=%.3f)", path_sanity["avg_slope"],
+        )
+
+    # --- (m) Build alignment dict ---
     alignment = {
         "path": [(int(u), int(r)) for u, r in path_dedup],
         "dtw_distance": round(float(distance), 4),
         "pitch_deviations": pitch_deviations,
         "timing_offsets": timing_offsets,
         "energy_ratios": energy_ratios,
+        "path_sanity": path_sanity,
     }
     logger.info(
-        "Alignment complete: %d pairs, DTW distance=%.2f",
+        "Alignment complete: %d pairs, DTW distance=%.2f, singing_onset=%.2fs",
         len(path_dedup),
         distance,
+        singing_onset,
     )
     return alignment
 
@@ -365,6 +420,200 @@ def align_features(user_features: dict, ref_features: dict) -> dict:
 def _nearest_idx(arr: np.ndarray, value: float) -> int:
     """Return the index of the element in *arr* closest to *value*."""
     return int(np.argmin(np.abs(arr - value)))
+
+
+def _first_sustained_voicing(pitch: np.ndarray, min_consecutive: int = 5) -> int:
+    """Return index of the first run of N consecutive voiced frames.
+
+    A frame is "voiced" if its pitch value is > 0 and not NaN.
+    Returns 0 if no such run is found (conservative fallback).
+    """
+    voiced = (~np.isnan(pitch)) & (pitch > 0)
+    run_start = 0
+    run_len = 0
+    for i, v in enumerate(voiced):
+        if v:
+            if run_len == 0:
+                run_start = i
+            run_len += 1
+            if run_len >= min_consecutive:
+                return run_start
+        else:
+            run_len = 0
+    return 0
+
+
+def _detect_singing_onset(
+    user_pitch: np.ndarray,
+    user_times: np.ndarray,
+    ref_pitch: np.ndarray,
+    ref_times: np.ndarray,
+    frame_dur: float = 0.02,
+    window_s: float = 1.0,
+    max_search_s: float = 5.0,
+    voicing_thresh: float = 0.30,
+    stability_thresh_cents: float = 200.0,
+    pitch_match_cents: float = 500.0,
+) -> float:
+    """Detect where real singing begins by sliding a window over the start.
+
+    Returns the timestamp (seconds) of the first window that passes:
+      1. Voicing ratio >= voicing_thresh
+      2. Pitch stability (std dev < stability_thresh_cents)
+      3. Pitch range match with reference (octave-folded, within pitch_match_cents)
+
+    Returns 0.0 if the first window already passes or no good window is found.
+    """
+    if len(user_pitch) == 0 or len(ref_pitch) == 0 or len(user_times) == 0:
+        return 0.0
+
+    # Cap search to actual recording length
+    max_search_s = min(max_search_s, float(user_times[-1]))
+
+    window_frames = max(1, int(window_s / frame_dur))
+    max_search_frames = min(len(user_pitch), int(max_search_s / frame_dur))
+
+    # Find the reference's first voiced region median pitch (first 5s)
+    ref_first_5s_idx = next(
+        (i for i, t in enumerate(ref_times) if t > 5.0),
+        len(ref_times),
+    )
+    ref_first_voiced = ref_pitch[:ref_first_5s_idx]
+    ref_first_voiced = ref_first_voiced[
+        (~np.isnan(ref_first_voiced)) & (ref_first_voiced > 0)
+    ]
+    if len(ref_first_voiced) == 0:
+        # No voiced frames in reference — can't do pitch matching
+        return 0.0
+    ref_median_hz = float(np.median(ref_first_voiced))
+
+    step = max(1, window_frames // 4)  # 25% overlap
+    for start in range(0, max_search_frames, step):
+        end = min(start + window_frames, len(user_pitch))
+        window = user_pitch[start:end]
+
+        if len(window) == 0:
+            continue
+
+        voiced = window[(~np.isnan(window)) & (window > 0)]
+
+        # Check 1: enough voicing
+        voicing_ratio = len(voiced) / len(window)
+        if voicing_ratio < voicing_thresh:
+            continue
+
+        # Check 2: pitch stability (std dev in cents)
+        if len(voiced) < 3:
+            continue
+        median_hz = float(np.median(voiced))
+        if median_hz <= 0:
+            continue
+        cents_from_median = 1200.0 * np.log2(voiced / median_hz)
+        stability = float(np.std(cents_from_median))
+        if stability > stability_thresh_cents:
+            continue
+
+        # Check 3: pitch range match (octave-folded)
+        cents_diff = 1200.0 * np.log2(median_hz / ref_median_hz)
+        cents_diff_folded = abs(((cents_diff + 600) % 1200) - 600)
+        if cents_diff_folded > pitch_match_cents:
+            continue
+
+        # All checks passed — this is singing onset
+        onset_time = float(user_times[start]) if start < len(user_times) else 0.0
+        return onset_time
+
+    # No good window found — don't trim (conservative)
+    return 0.0
+
+
+def _build_dtw_features(
+    pitch: np.ndarray,
+    rms_interp: np.ndarray,
+    weights: tuple = (1.0, 0.5, 0.3),
+) -> np.ndarray:
+    """Build weighted 3D feature vectors for DTW: [log_pitch, voicing, rms].
+
+    Normalises each dimension to [0, 1] before applying weights so that
+    the euclidean distance respects the intended importance ratios.
+    """
+    voiced = (~np.isnan(pitch)) & (pitch > 0)
+
+    # Log pitch normalised to [0, 1] using human singing range (50–2000 Hz)
+    log_min, log_max = np.log2(50.0), np.log2(2000.0)
+    log_p = np.where(voiced, np.log2(np.maximum(pitch, 50.0)), 0.0)
+    log_p_norm = np.where(voiced, (log_p - log_min) / (log_max - log_min), 0.0)
+    log_p_norm = np.clip(log_p_norm, 0.0, 1.0)
+
+    voicing = voiced.astype(float)
+
+    # RMS is already [0, 1] from extract_features normalisation
+    rms = np.clip(rms_interp, 0.0, 1.0)
+
+    return np.column_stack([
+        log_p_norm * weights[0],
+        voicing * weights[1],
+        rms * weights[2],
+    ])
+
+
+def _check_path_sanity(
+    path: list,
+    user_times: np.ndarray,
+    ref_times: np.ndarray,
+    sample_interval_s: float = 1.0,
+    slope_warn_lo: float = 0.5,
+    slope_warn_hi: float = 2.0,
+) -> dict:
+    """Sample the DTW warping path and check for drift.
+
+    Returns dict with:
+        - is_sane: bool — True if no drift regions detected
+        - drift_regions: list of {user_time, ref_time, slope}
+        - avg_slope: float
+    """
+    if len(path) < 2:
+        return {"is_sane": True, "drift_regions": [], "avg_slope": 1.0}
+
+    # Sample path at ~1s intervals (in user time)
+    samples = []
+    last_user_time = -999.0
+    for u_idx, r_idx in path:
+        u_t = float(user_times[u_idx]) if u_idx < len(user_times) else 0.0
+        r_t = float(ref_times[r_idx]) if r_idx < len(ref_times) else 0.0
+        if u_t - last_user_time >= sample_interval_s:
+            samples.append((u_t, r_t))
+            last_user_time = u_t
+
+    if len(samples) < 2:
+        return {"is_sane": True, "drift_regions": [], "avg_slope": 1.0}
+
+    slopes = []
+    drift_regions = []
+    for i in range(1, len(samples)):
+        du = samples[i][0] - samples[i - 1][0]
+        dr = samples[i][1] - samples[i - 1][1]
+        if abs(dr) < 1e-6:
+            slope = float("inf")
+        else:
+            slope = du / dr
+        slopes.append(slope)
+
+        if slope < slope_warn_lo or slope > slope_warn_hi:
+            drift_regions.append({
+                "user_time": round(samples[i][0], 2),
+                "ref_time": round(samples[i][1], 2),
+                "slope": round(slope, 3),
+            })
+
+    finite_slopes = [s for s in slopes if np.isfinite(s)]
+    avg_slope = float(np.mean(finite_slopes)) if finite_slopes else 1.0
+
+    return {
+        "is_sane": len(drift_regions) == 0,
+        "drift_regions": drift_regions,
+        "avg_slope": round(avg_slope, 3),
+    }
 
 
 def features_to_json(features: dict) -> str:

@@ -96,6 +96,7 @@ class ProcessVocalRequest(BaseModel):
     recordingDurationMs: int
     useHeadphones: bool = False
     referenceVocalId: Optional[str] = None
+    scoringLevel: str = "choir"
 
 
 class PrepareReferenceRequest(BaseModel):
@@ -736,6 +737,7 @@ def _score_and_coach_local(
     ref_features: dict | None,
     voice_part: str,
     song_title: str | None = None,
+    scoring_level: str = "choir",
 ) -> dict:
     """Run scoring + coaching in-process (no container spawn overhead)."""
     from processing import align_features
@@ -748,7 +750,7 @@ def _score_and_coach_local(
         logger.info("[PROFILE] align: %.1fs", time.time() - t0)
 
         t1 = time.time()
-        scores = score_recording(user_features, ref_features, alignment)
+        scores = score_recording(user_features, ref_features, alignment, scoring_level=scoring_level)
         logger.info("[PROFILE] score: %.1fs", time.time() - t1)
     else:
         logger.info("No reference available, running standalone analysis")
@@ -1004,7 +1006,8 @@ async def process_vocal_analysis(req: ProcessVocalRequest):
         song_title = _get_song_title(req.songId, conn=db)
 
         result = _score_and_coach_local(
-            user_features, ref_features, req.voicePart, song_title
+            user_features, ref_features, req.voicePart, song_title,
+            scoring_level=req.scoringLevel,
         )
         scores = result["scores"]
         coaching_tips = result["coachingTips"]

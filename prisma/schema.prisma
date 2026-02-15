@@ -17,6 +17,7 @@ model User {
   voicePart               String?             // soprano, mezzo, alto, tenor, baritone, bass
   role                    String              @default("member") // member, director, admin
   shabbatMode             Boolean             @default(false)
+  scoringLevel            String              @default("choir") // choir, semi_pro, pro
   xp                      Int                 @default(0)
   currentStreak           Int                 @default(0)
   longestStreak           Int                 @default(0)

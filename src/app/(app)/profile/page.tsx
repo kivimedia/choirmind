@@ -13,6 +13,7 @@ interface UserProfile {
   name: string | null
   email: string
   voicePart: string | null
+  scoringLevel: string
   locale: string
   xp: number
   currentStreak: number
@@ -30,6 +31,12 @@ const VOICE_PARTS = [
   { value: 'bass', label: 'בס' },
 ]
 
+const SCORING_LEVELS = [
+  { value: 'choir', label: 'זמר/ת מקהלה', desc: 'סלחני — מתאים לשירת מקהלה חובבנית' },
+  { value: 'semi_pro', label: 'חצי מקצועי', desc: 'מאוזן — ציפיות גבוהות יותר לדיוק' },
+  { value: 'pro', label: 'מקצועי', desc: 'מחמיר — סטנדרט ביצוע מקצועי' },
+]
+
 export default function ProfilePage() {
   const { data: session } = useSession()
   const t = useTranslations('common')
@@ -40,6 +47,7 @@ export default function ProfilePage() {
   const [saved, setSaved] = useState(false)
   const [name, setName] = useState('')
   const [voicePart, setVoicePart] = useState('')
+  const [scoringLevel, setScoringLevel] = useState('choir')
 
   useEffect(() => {
     async function fetchProfile() {
@@ -50,6 +58,7 @@ export default function ProfilePage() {
         setProfile(data.user)
         setName(data.user.name || '')
         setVoicePart(data.user.voicePart || '')
+        setScoringLevel(data.user.scoringLevel || 'choir')
       } catch {
         // ignore
       } finally {
@@ -66,7 +75,7 @@ export default function ProfilePage() {
       const res = await fetch('/api/user/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, voicePart: voicePart || null }),
+        body: JSON.stringify({ name, voicePart: voicePart || null, scoringLevel }),
       })
       if (res.ok) {
         setSaved(true)
@@ -119,6 +128,36 @@ export default function ProfilePage() {
           onChange={(e) => setVoicePart(e.target.value)}
           options={VOICE_PARTS}
         />
+
+        {/* Scoring Level */}
+        <div>
+          <label className="block text-sm font-medium text-foreground mb-2">רמת דיוק</label>
+          <div className="space-y-2">
+            {SCORING_LEVELS.map((level) => (
+              <label
+                key={level.value}
+                className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                  scoringLevel === level.value
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/40'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="scoringLevel"
+                  value={level.value}
+                  checked={scoringLevel === level.value}
+                  onChange={(e) => setScoringLevel(e.target.value)}
+                  className="mt-1 accent-primary"
+                />
+                <div>
+                  <div className="font-medium text-foreground">{level.label}</div>
+                  <div className="text-xs text-text-muted">{level.desc}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
 
         <div className="pt-2" />
 

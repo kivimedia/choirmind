@@ -97,16 +97,19 @@ export default function AdminPaymentsPage() {
       const res = await fetch('/api/admin/refund', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chargeId, amount }),
+        body: JSON.stringify({ chargeId, amount, userId: refundUser?.id }),
       })
       const data = await res.json()
       if (res.ok) {
-        setRefundResult({ chargeId, message: `החזר בוצע בהצלחה (${data.id})` })
-        // Refresh charges
+        const minDeducted = data.deductedSeconds ? Math.floor(data.deductedSeconds / 60) : 0
+        const deductMsg = minDeducted > 0 ? `. קוזזו ${minDeducted} דקות` : ''
+        setRefundResult({ chargeId, message: `החזר בוצע בהצלחה (${data.id})${deductMsg}` })
+        // Refresh charges and users table
         if (refundUser) {
           const r = await fetch(`/api/admin/refund?userId=${refundUser.id}`)
           if (r.ok) setCharges((await r.json()).charges)
         }
+        fetchUsers(search)
       } else {
         setRefundResult({ chargeId, message: `שגיאה: ${data.error}` })
       }
