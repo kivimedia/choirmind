@@ -6,6 +6,7 @@ import Modal from '@/components/ui/Modal'
 import ScoreDial from './ScoreDial'
 import SectionTimeline from './SectionTimeline'
 import { useVocalRecorder } from '@/hooks/useVocalRecorder'
+import MicSelector from './MicSelector'
 import type { AudioActions } from '@/components/audio/AudioPlayer'
 
 // ---------------------------------------------------------------------------
@@ -303,6 +304,7 @@ export default function ChunkRecordingPanel({
   const [step, setStep] = useState<Step>('ready')
   const [withBacking, setWithBacking] = useState(true)
   const [useHeadphones, setUseHeadphones] = useState(false)
+  const [micDeviceId, setMicDeviceId] = useState<string | null>(null)
   const [recordingAudioMode, setRecordingAudioMode] = useState<RecordingAudioMode>('full_mix')
 
   // Compute effective backing URL based on audio mode
@@ -352,6 +354,7 @@ export default function ChunkRecordingPanel({
   const recorder = useVocalRecorder({
     backingTrackBuffer: withBacking && hasAudio ? backingBuffer : null,
     useHeadphones,
+    deviceId: micDeviceId,
   })
 
   // Keep recording blob URL for playback in results
@@ -571,6 +574,9 @@ export default function ChunkRecordingPanel({
         {/* ==================== Ready ==================== */}
         {step === 'ready' && (
           <div className="space-y-4">
+            {/* Microphone selector */}
+            <MicSelector selectedDeviceId={micDeviceId} onSelect={setMicDeviceId} />
+
             {/* Headphones toggle */}
             <label className="flex items-center gap-3 cursor-pointer">
               <input

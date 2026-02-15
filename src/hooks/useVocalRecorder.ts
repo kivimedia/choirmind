@@ -23,6 +23,7 @@ export interface VocalRecorderActions {
 export interface UseVocalRecorderOptions {
   backingTrackBuffer?: ArrayBuffer | null
   useHeadphones?: boolean
+  deviceId?: string | null
 }
 
 export function useVocalRecorder(options?: UseVocalRecorderOptions): VocalRecorderState & VocalRecorderActions {
@@ -75,12 +76,16 @@ export function useVocalRecorder(options?: UseVocalRecorderOptions): VocalRecord
       // removes quiet passages, and autoGainControl causes sudden
       // volume drops/spikes that sound like distortion.
       const headphones = !!options?.useHeadphones
+      const audioConstraints: MediaTrackConstraints = {
+        echoCancellation: !headphones,
+        noiseSuppression: !headphones,
+        autoGainControl: !headphones,
+      }
+      if (options?.deviceId) {
+        audioConstraints.deviceId = { exact: options.deviceId }
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: !headphones,
-          noiseSuppression: !headphones,
-          autoGainControl: !headphones,
-        },
+        audio: audioConstraints,
       })
 
       // Set up AudioContext + AnalyserNode for waveform

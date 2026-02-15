@@ -9,6 +9,7 @@ import AudioModeSelector, { type AudioMode } from '@/components/audio/AudioModeS
 import KaraokeDisplay from '@/components/practice/KaraokeDisplay'
 import FadeOutDisplay from '@/components/practice/FadeOutDisplay'
 import { useVocalRecorder } from '@/hooks/useVocalRecorder'
+import MicSelector from './MicSelector'
 import { computeChunkBoundaries, getActiveChunkIndex } from '@/lib/chunk-boundaries'
 
 // ---------------------------------------------------------------------------
@@ -285,6 +286,7 @@ export default function FullSongRecordingPanel({
   const [step, setStep] = useState<Step>('ready')
   const [audioMode, setAudioMode] = useState<AudioMode>('full_mix')
   const [useHeadphones, setUseHeadphones] = useState(false)
+  const [micDeviceId, setMicDeviceId] = useState<string | null>(null)
 
   // Resolve backing track URL based on audio mode
   const backingTrackUrl = useMemo(() => {
@@ -333,6 +335,7 @@ export default function FullSongRecordingPanel({
   const recorder = useVocalRecorder({
     backingTrackBuffer: backingTrackUrl ? backingBuffer : null,
     useHeadphones,
+    deviceId: micDeviceId,
   })
 
   // Reference vocal URL (the actual song's isolated vocal for this voice part)
@@ -593,6 +596,9 @@ export default function FullSongRecordingPanel({
                 />
               </div>
             )}
+
+            {/* Microphone selector */}
+            <MicSelector selectedDeviceId={micDeviceId} onSelect={setMicDeviceId} />
 
             {/* Headphones toggle */}
             <label className="flex items-center gap-3 cursor-pointer">
