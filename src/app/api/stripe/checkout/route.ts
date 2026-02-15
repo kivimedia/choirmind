@@ -11,9 +11,9 @@ function getStripe() {
 }
 
 const PLAN_CONFIG = {
-  starter: { seconds: 3600, label: 'Starter' },
-  pro: { seconds: 18000, label: 'Pro' },
-  studio: { seconds: 60000, label: 'Studio' },
+  starter: { seconds: 1800, label: 'Starter' },
+  pro: { seconds: 9000, label: 'Pro' },
+  studio: { seconds: 30000, label: 'Studio' },
 } as const
 
 type PlanId = keyof typeof PLAN_CONFIG

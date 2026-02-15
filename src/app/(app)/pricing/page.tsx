@@ -18,15 +18,15 @@ interface QuotaInfo {
 }
 
 const PLANS: Array<{ id: string; name: string; minutes: number; price: string; priceNum: number; recommended?: boolean }> = [
-  { id: 'starter', name: 'Starter', minutes: 60, price: '$10', priceNum: 10 },
-  { id: 'pro', name: 'Pro', minutes: 300, price: '$30', priceNum: 30, recommended: true },
-  { id: 'studio', name: 'Studio', minutes: 1000, price: '$90', priceNum: 90 },
+  { id: 'starter', name: 'Starter', minutes: 30, price: '$10', priceNum: 10 },
+  { id: 'pro', name: 'Pro', minutes: 150, price: '$30', priceNum: 30, recommended: true },
+  { id: 'studio', name: 'Studio', minutes: 500, price: '$90', priceNum: 90 },
 ]
 
 const TOPUPS = [
-  { id: 'starter', minutes: 60, price: '$13' },
-  { id: 'pro', minutes: 300, price: '$39' },
-  { id: 'studio', minutes: 1000, price: '$117' },
+  { id: 'starter', minutes: 30, price: '$13' },
+  { id: 'pro', minutes: 150, price: '$39' },
+  { id: 'studio', minutes: 500, price: '$117' },
 ]
 
 export default function PricingPage() {

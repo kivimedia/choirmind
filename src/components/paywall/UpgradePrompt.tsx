@@ -10,9 +10,9 @@ interface UpgradePromptProps {
 }
 
 const PLANS = [
-  { id: 'starter', name: 'Starter', minutes: 60, price: '$10/mo' },
-  { id: 'pro', name: 'Pro', minutes: 300, price: '$30/mo' },
-  { id: 'studio', name: 'Studio', minutes: 1000, price: '$90/mo' },
+  { id: 'starter', name: 'Starter', minutes: 30, price: '$10/mo' },
+  { id: 'pro', name: 'Pro', minutes: 150, price: '$30/mo' },
+  { id: 'studio', name: 'Studio', minutes: 500, price: '$90/mo' },
 ] as const
 
 export default function UpgradePrompt({ isOpen, onClose }: UpgradePromptProps) {
