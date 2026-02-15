@@ -419,7 +419,7 @@ export default function ScanPage() {
                     <div className="mt-0.5 shrink-0">
                       <div
                         className={[
-                          'flex h-5 w-5 items-center justify-center rounded border-2 transition-colors',
+                          'flex h-6 w-6 items-center justify-center rounded border-2 transition-colors',
                           existing
                             ? 'border-border bg-surface-hover cursor-not-allowed'
                             : selected.has(i)

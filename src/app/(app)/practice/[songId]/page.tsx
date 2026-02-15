@@ -504,12 +504,12 @@ export default function PracticeSessionPage() {
                   setCurrentChunkIndex(i)
                 }}
                 className={[
-                  'h-2.5 shrink-0 rounded-full transition-all duration-300',
+                  'h-4 w-4 shrink-0 rounded-full transition-all duration-300 p-0',
                   i === currentChunkIndex
                     ? 'w-6 bg-primary'
                     : i < currentChunkIndex
-                      ? 'w-2.5 bg-primary/40'
-                      : 'w-2.5 bg-border',
+                      ? 'bg-primary/40'
+                      : 'bg-border',
                 ].join(' ')}
                 title={c.label}
               />
@@ -562,7 +562,7 @@ export default function PracticeSessionPage() {
                     setShowFullLyrics(false)
                   }}
                   className={[
-                    'rounded-full transition-colors text-xs font-medium min-w-[28px] min-h-[28px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center',
+                    'rounded-full transition-colors text-xs font-medium min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center',
                     isActive
                       ? 'bg-primary text-white'
                       : 'text-text-muted hover:bg-surface-hover',

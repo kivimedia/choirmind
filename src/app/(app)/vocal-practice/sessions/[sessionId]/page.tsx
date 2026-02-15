@@ -235,7 +235,7 @@ export default function SessionDetailPage() {
       <Card>
         <div className="flex flex-col items-center gap-4">
           <ScoreDial score={overallScore} size="lg" />
-          <div className="flex gap-6 text-center">
+          <div className="flex flex-wrap gap-3 sm:gap-6 text-center">
             <div>
               <p className="text-lg font-bold text-foreground tabular-nums" dir="ltr">{Math.round(pitchScore)}</p>
               <p className="text-xs text-text-muted">גובה</p>

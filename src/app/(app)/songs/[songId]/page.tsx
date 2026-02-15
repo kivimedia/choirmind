@@ -269,7 +269,7 @@ export default function SongDetailPage() {
             className="mt-1 rounded-lg p-2 text-text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
           >
             <svg
-              className="h-5 w-5"
+              className="h-5 w-5 rtl:rotate-180"
               xmlns="http://www.w3.org/2000/svg"
               fill="none"
               viewBox="0 0 24 24"

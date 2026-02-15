@@ -656,7 +656,7 @@ export default function SongsPage() {
             </button>
           </div>
           {selectedIds.size > 0 && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row items-center gap-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -694,7 +694,7 @@ export default function SongsPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {['all', 'he', 'en', 'mixed'].map((lang) => (
                 <button
                   key={lang}

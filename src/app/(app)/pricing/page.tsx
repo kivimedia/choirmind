@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
@@ -29,10 +30,35 @@ const TOPUPS = [
   { id: 'studio', minutes: 500, price: '$117', songsHint: '~165 שירים' },
 ]
 
-export default function PricingPage() {
+function PricingContent() {
+  const searchParams = useSearchParams()
   const [quota, setQuota] = useState<QuotaInfo | null>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [banner, setBanner] = useState<{ type: 'success' | 'cancelled'; message: string } | null>(null)
+
+  // Read checkout redirect params
+  useEffect(() => {
+    const success = searchParams.get('success')
+    const cancelled = searchParams.get('cancelled')
+    const topup = searchParams.get('topup')
+
+    if (success === 'true') {
+      setBanner({ type: 'success', message: 'המנוי הופעל בהצלחה! הדקות נוספו לחשבון שלך.' })
+    } else if (topup === 'true') {
+      setBanner({ type: 'success', message: 'הטעינה בוצעה בהצלחה! הדקות נוספו לחשבון שלך.' })
+    } else if (cancelled === 'true') {
+      setBanner({ type: 'cancelled', message: 'התשלום בוטל. לא בוצע חיוב.' })
+    }
+  }, [searchParams])
+
+  // Auto-dismiss banner
+  useEffect(() => {
+    if (!banner) return
+    const timer = setTimeout(() => setBanner(null), 6000)
+    return () => clearTimeout(timer)
+  }, [banner])
 
   useEffect(() => {
     fetch('/api/vocal-analysis/quota')
@@ -43,6 +69,7 @@ export default function PricingPage() {
 
   async function handleCheckout(type: 'subscribe' | 'topup', planId: string) {
     setActionLoading(`${type}-${planId}`)
+    setError(null)
     try {
       const res = await fetch('/api/stripe/checkout', {
         method: 'POST',
@@ -50,9 +77,13 @@ export default function PricingPage() {
         body: JSON.stringify({ type, planId }),
       })
       const data = await res.json()
-      if (data.url) window.location.href = data.url
+      if (data.url) {
+        window.location.href = data.url
+      } else {
+        setError(data.error || 'אירעה שגיאה בהפניה לתשלום. נסו שוב.')
+      }
     } catch {
-      // handled
+      setError('אירעה שגיאה בהפניה לתשלום. נסו שוב.')
     } finally {
       setActionLoading(null)
     }
@@ -60,12 +91,17 @@ export default function PricingPage() {
 
   async function handlePortal() {
     setActionLoading('portal')
+    setError(null)
     try {
       const res = await fetch('/api/stripe/portal', { method: 'POST' })
       const data = await res.json()
-      if (data.url) window.location.href = data.url
+      if (data.url) {
+        window.location.href = data.url
+      } else {
+        setError(data.error || 'אירעה שגיאה בפתיחת ניהול מנוי. נסו שוב.')
+      }
     } catch {
-      // handled
+      setError('אירעה שגיאה בפתיחת ניהול מנוי. נסו שוב.')
     } finally {
       setActionLoading(null)
     }
@@ -86,6 +122,26 @@ export default function PricingPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-8">
+      {/* Checkout feedback banners */}
+      {banner && (
+        <div
+          className={`rounded-lg px-4 py-3 text-sm font-medium transition-opacity ${
+            banner.type === 'success'
+              ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+              : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
+          }`}
+        >
+          {banner.message}
+        </div>
+      )}
+
+      {/* Error message */}
+      {error && (
+        <div className="rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 px-4 py-3 text-sm font-medium">
+          {error}
+        </div>
+      )}
+
       <div>
         <h1 className="text-2xl font-bold text-foreground">תוכניות ניתוח קולי</h1>
         <p className="mt-1 text-text-muted">דקות שלא נוצלו עוברות לחודש הבא</p>
@@ -220,5 +276,18 @@ export default function PricingPage() {
         </div>
       ) : null}
     </div>
+  )
+}
+
+export default function PricingPage() {
+  return (
+    <Suspense fallback={
+      <div className="animate-pulse space-y-4">
+        <div className="h-8 w-48 rounded bg-border/40" />
+        <div className="h-64 rounded-xl bg-border/30" />
+      </div>
+    }>
+      <PricingContent />
+    </Suspense>
   )
 }

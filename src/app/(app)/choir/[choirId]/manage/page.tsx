@@ -347,7 +347,7 @@ export default function ChoirManagePage() {
             >
               <span
                 className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
-                  leaderboardEnabled ? 'translate-x-5' : 'translate-x-0'
+                  leaderboardEnabled ? 'translate-x-5 rtl:-translate-x-5' : 'translate-x-0'
                 }`}
               />
             </button>

@@ -206,7 +206,7 @@ export default function KaraokeDisplay({
       ref={containerRef}
       dir="rtl"
       className="lyrics-display text-start"
-      style={{ fontSize: '24px', lineHeight: 1.8 }}
+      style={{ fontSize: 'clamp(18px, 5vw, 24px)', lineHeight: 1.8 }}
     >
       {lines.map((lineWords, lineIdx) => {
         const isActive = lineIdx === activeRawLineIdx

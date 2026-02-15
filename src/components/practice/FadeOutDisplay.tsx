@@ -97,7 +97,7 @@ export default function FadeOutDisplay({
     <div
       dir="rtl"
       className="lyrics-display text-start"
-      style={{ fontSize: '24px', lineHeight: 1.8 }}
+      style={{ fontSize: 'clamp(18px, 5vw, 24px)', lineHeight: 1.8 }}
     >
       {lines.map((lineWords, lineIdx) => (
         <p key={lineIdx} className="mb-2 min-h-[1.8em]">

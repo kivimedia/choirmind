@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { checkAndUnlockAchievements } from '@/lib/achievement-checker'
+import { getMemoryStrength, getStatus } from '@/lib/spaced-repetition'
 
 // Spaced repetition logic for a single chunk
 function computeChunkUpdate(
@@ -47,14 +48,8 @@ function computeChunkUpdate(
 
   const now = new Date()
   const nextReviewAt = new Date(now.getTime() + newIntervalDays * 24 * 60 * 60 * 1000)
-  const memoryStrength = 1.0
-
-  let status: string
-  if (memoryStrength < 0.2) status = 'fragile'
-  else if (memoryStrength < 0.4) status = 'shaky'
-  else if (memoryStrength < 0.6) status = 'developing'
-  else if (memoryStrength < 0.8) status = 'solid'
-  else status = 'locked_in'
+  const memoryStrength = getMemoryStrength(now, newIntervalDays)
+  const status = getStatus(memoryStrength)
 
   let newFadeLevel: number
   if (selfRating === 'nailed_it') {

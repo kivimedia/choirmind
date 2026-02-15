@@ -17,17 +17,21 @@ export default function SettingsPage() {
   const [joining, setJoining] = useState(false)
   const [joinMessage, setJoinMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState(false)
 
   useEffect(() => {
     async function fetchChoirs() {
       try {
+        setFetchError(false)
         const res = await fetch('/api/choir')
         if (res.ok) {
           const data = await res.json()
           setChoirs(data.choirs || [])
+        } else {
+          setFetchError(true)
         }
       } catch {
-        // ignore
+        setFetchError(true)
       } finally {
         setLoading(false)
       }
@@ -71,6 +75,30 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-lg space-y-6">
       <h1 className="text-2xl font-bold text-foreground">הגדרות</h1>
+
+      {fetchError && (
+        <div className="rounded-lg border border-danger/30 bg-danger/5 px-4 py-3 flex items-center justify-between">
+          <span className="text-sm text-danger">שגיאה בטעינת נתונים</span>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true)
+              setFetchError(false)
+              fetch('/api/choir')
+                .then((res) => {
+                  if (res.ok) return res.json()
+                  throw new Error('Failed')
+                })
+                .then((data) => setChoirs(data.choirs || []))
+                .catch(() => setFetchError(true))
+                .finally(() => setLoading(false))
+            }}
+            className="rounded-lg px-3 py-1 text-xs font-medium text-danger hover:bg-danger/10 transition-colors"
+          >
+            נסה שנית
+          </button>
+        </div>
+      )}
 
       {/* Current choirs */}
       <Card className="!p-6">

@@ -51,3 +51,5 @@ mila-scrape-report.json
 
 # migration scripts (one-off)
 scripts/migrate-to-pg.ts
+
+.env*.local

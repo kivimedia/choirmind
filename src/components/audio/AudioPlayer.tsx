@@ -128,7 +128,7 @@ export default function AudioPlayer({
           <button
             type="button"
             onClick={() => engine.seekTo(Math.max(0, engine.currentTimeMs - 3000))}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-text-muted transition-colors hover:text-foreground hover:bg-surface-hover active:bg-border"
+            className="flex h-10 w-10 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full text-text-muted transition-colors hover:text-foreground hover:bg-surface-hover active:bg-border"
             aria-label="Skip back 3 seconds"
           >
             <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
@@ -141,7 +141,7 @@ export default function AudioPlayer({
             type="button"
             onClick={engine.toggle}
             disabled={engine.isLoading}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+            className="flex h-11 w-11 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-full bg-primary text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
             aria-label={engine.isPlaying ? 'Pause' : 'Play'}
           >
             {engine.isLoading ? (
@@ -162,7 +162,7 @@ export default function AudioPlayer({
           <button
             type="button"
             onClick={() => engine.seekTo(Math.min(engine.durationMs, engine.currentTimeMs + 3000))}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-text-muted transition-colors hover:text-foreground hover:bg-surface-hover active:bg-border"
+            className="flex h-10 w-10 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full text-text-muted transition-colors hover:text-foreground hover:bg-surface-hover active:bg-border"
             aria-label="Skip forward 3 seconds"
           >
             <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">

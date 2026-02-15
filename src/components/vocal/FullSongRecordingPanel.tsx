@@ -532,7 +532,7 @@ export default function FullSongRecordingPanel({
     if (step !== 'analyzing' || !jobId) return
 
     let attempts = 0
-    const maxAttempts = 100
+    const maxAttempts = 200
 
     pollRef.current = setInterval(async () => {
       attempts++

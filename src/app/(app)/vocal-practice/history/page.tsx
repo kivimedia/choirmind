@@ -187,7 +187,7 @@ export default function VocalHistoryPage() {
         <>
           {/* Song filter */}
           {uniqueSongs.length > 1 && (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <label className="text-sm text-text-muted">סינון לפי שיר:</label>
               <select
                 value={filterSongId}

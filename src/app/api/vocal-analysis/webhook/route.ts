@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { calculateVocalXp } from '@/lib/xp'
+import { checkAndUnlockAchievements } from '@/lib/achievement-checker'
 
 // POST /api/vocal-analysis/webhook
 // Python service callback (secret-protected)
@@ -41,14 +43,47 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Calculate XP: base on overall score
+      // Calculate XP using centralized formula
       const overallScore = practiceSession.overallScore ?? 0
-      let xpEarned = 0
-      if (overallScore >= 90) xpEarned = 25
-      else if (overallScore >= 75) xpEarned = 20
-      else if (overallScore >= 60) xpEarned = 15
-      else if (overallScore >= 40) xpEarned = 10
-      else xpEarned = 5
+
+      // Fetch user streak for XP multiplier
+      const user = await prisma.user.findUnique({
+        where: { id: job.userId },
+        select: { currentStreak: true },
+      })
+      const currentStreak = user?.currentStreak ?? 0
+
+      // Fetch previous session for the same song to compute section improvement bonus
+      const previousSession = await prisma.vocalPracticeSession.findFirst({
+        where: { userId: job.userId, songId: job.songId },
+        orderBy: { createdAt: 'desc' },
+        select: { overallScore: true, sectionScores: true },
+      })
+
+      const currentSectionScores: { overallScore: number }[] = (() => {
+        try {
+          const raw = practiceSession.sectionScores
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+          return Array.isArray(parsed) ? parsed : []
+        } catch { return [] }
+      })()
+
+      const previousSectionScores: { overallScore: number }[] | undefined = (() => {
+        if (!previousSession?.sectionScores) return undefined
+        try {
+          const raw = previousSession.sectionScores
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+          return Array.isArray(parsed) ? parsed : undefined
+        } catch { return undefined }
+      })()
+
+      const xpResult = calculateVocalXp({
+        overallScore,
+        currentSectionScores: currentSectionScores.length > 0 ? currentSectionScores : undefined,
+        previousSectionScores,
+        currentStreak,
+      })
+      const xpEarned = xpResult.totalXp
 
       await prisma.$transaction(async (tx) => {
         // Create VocalPracticeSession
@@ -93,6 +128,15 @@ export async function POST(request: NextRequest) {
           data: {
             xp: { increment: xpEarned },
           },
+        })
+
+        // Check and unlock achievements
+        await checkAndUnlockAchievements(tx, job.userId, {
+          type: 'vocal_practice',
+          songId: job.songId,
+          overallScore,
+          sectionScores: currentSectionScores,
+          previousOverallScore: previousSession?.overallScore ?? undefined,
         })
       })
 

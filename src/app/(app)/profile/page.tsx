@@ -43,28 +43,35 @@ export default function ProfilePage() {
 
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [name, setName] = useState('')
   const [voicePart, setVoicePart] = useState('')
   const [scoringLevel, setScoringLevel] = useState('choir')
 
-  useEffect(() => {
-    async function fetchProfile() {
-      try {
-        const res = await fetch('/api/user/profile')
-        if (!res.ok) return
-        const data = await res.json()
-        setProfile(data.user)
-        setName(data.user.name || '')
-        setVoicePart(data.user.voicePart || '')
-        setScoringLevel(data.user.scoringLevel || 'choir')
-      } catch {
-        // ignore
-      } finally {
-        setLoading(false)
+  async function fetchProfile() {
+    try {
+      setLoading(true)
+      setError(null)
+      const res = await fetch('/api/user/profile')
+      if (!res.ok) {
+        setError('שגיאה בטעינת הפרופיל')
+        return
       }
+      const data = await res.json()
+      setProfile(data.user)
+      setName(data.user.name || '')
+      setVoicePart(data.user.voicePart || '')
+      setScoringLevel(data.user.scoringLevel || 'choir')
+    } catch {
+      setError('שגיאה בטעינת הפרופיל')
+    } finally {
+      setLoading(false)
     }
+  }
+
+  useEffect(() => {
     fetchProfile()
   }, [])
 
@@ -92,6 +99,17 @@ export default function ProfilePage() {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <p className="text-danger">{error}</p>
+        <Button variant="outline" onClick={fetchProfile}>
+          נסו שוב
+        </Button>
       </div>
     )
   }
@@ -175,7 +193,7 @@ export default function ProfilePage() {
       {profile && (
         <Card className="!p-6">
           <h2 className="text-lg font-semibold text-foreground mb-4">סטטיסטיקות</h2>
-          <div className="grid grid-cols-3 gap-4 text-center">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center">
             <div>
               <div className="text-2xl font-bold text-primary">{profile.xp}</div>
               <div className="text-xs text-text-muted">XP</div>
