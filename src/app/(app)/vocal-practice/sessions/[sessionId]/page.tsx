@@ -187,13 +187,9 @@ export default function SessionDetailPage() {
 
   // Lyric lines & timestamps from chunks
   const lyricLines = chunks.flatMap(c => c.lyrics.split('\n').filter(Boolean))
-  const lineTimestamps = (() => {
-    const allTs = chunks.flatMap(c => {
-      try { return JSON.parse(c.lineTimestamps || '[]') } catch { return [] }
-    })
-    const offset = allTs.length > 0 ? allTs[0] : 0
-    return allTs.map((t: number) => t - offset)
-  })()
+  const lineTimestamps = chunks.flatMap(c => {
+    try { return JSON.parse(c.lineTimestamps || '[]') } catch { return [] }
+  })
 
   // Ref audio URL: isolated vocal from analysis
   const refAudioUrl = isolatedVocalUrl || null
