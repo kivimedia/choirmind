@@ -37,6 +37,10 @@ interface SectionTimelineProps {
   refAudioUrl?: string | null
   userAudioUrl?: string | null
   noteComparison?: NoteComparison[]
+  /** Lyric lines from the chunk — used to group notes by lyric line */
+  lyricLines?: string[]
+  /** Timestamps (seconds) for each lyric line boundary */
+  lineTimestamps?: number[]
 }
 
 function scoreColor(score: number | null): string {
@@ -245,35 +249,68 @@ function NoteStaff({
 
 // ── Line-by-line Note Comparison ──────────────────────
 
+function formatTime(sec: number): string {
+  const m = Math.floor(sec / 60)
+  const s = Math.floor(sec % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
 function NoteLineComparison({
   notes,
   playSnippet,
   playingSnippet,
+  lyricLines,
+  lineTimestamps,
 }: {
   notes: NoteComparison[]
   playSnippet: (startSec: number, duration: number, type: 'ref' | 'user') => void
   playingSnippet: { type: 'ref' | 'user'; currentTime: number } | null
+  lyricLines?: string[]
+  lineTimestamps?: number[]
 }) {
   if (notes.length === 0) return null
 
-  // Group notes into lines: split at time gaps > 0.8s or every 5 notes
-  const lines: NoteComparison[][] = []
-  let current: NoteComparison[] = []
-  for (let i = 0; i < notes.length; i++) {
-    if (current.length > 0) {
-      const gap = notes[i].refStartTime - notes[i - 1].refEndTime
-      if (gap > 0.8 || current.length >= 5) {
-        lines.push(current)
-        current = []
+  // Group notes into lines based on lyric line timestamps if available,
+  // otherwise fall back to time gaps > 0.8s or every 5 notes
+  const lines: { notes: NoteComparison[]; lyric?: string }[] = []
+
+  if (lineTimestamps && lineTimestamps.length > 1) {
+    // Build time boundaries from lyric line timestamps (in ms → convert to seconds)
+    const boundaries = lineTimestamps.map(t => t / 1000)
+    for (let li = 0; li < boundaries.length; li++) {
+      const tStart = boundaries[li]
+      const tEnd = li + 1 < boundaries.length ? boundaries[li + 1] : Infinity
+      const lineNotes = notes.filter(n => n.refStartTime >= tStart - 0.05 && n.refStartTime < tEnd - 0.05)
+      if (lineNotes.length > 0) {
+        lines.push({ notes: lineNotes, lyric: lyricLines?.[li] })
       }
     }
-    current.push(notes[i])
+    // Catch any notes outside the timestamp boundaries
+    const assigned = new Set(lines.flatMap(l => l.notes.map(n => n.noteIndex)))
+    const remaining = notes.filter(n => !assigned.has(n.noteIndex))
+    if (remaining.length > 0) {
+      lines.push({ notes: remaining })
+    }
+  } else {
+    // Fallback: split at time gaps > 0.8s or every 6 notes
+    let current: NoteComparison[] = []
+    for (let i = 0; i < notes.length; i++) {
+      if (current.length > 0) {
+        const gap = notes[i].refStartTime - notes[i - 1].refEndTime
+        if (gap > 0.8 || current.length >= 6) {
+          lines.push({ notes: current })
+          current = []
+        }
+      }
+      current.push(notes[i])
+    }
+    if (current.length > 0) lines.push({ notes: current })
   }
-  if (current.length > 0) lines.push(current)
 
   return (
     <div className="space-y-2" dir="ltr">
-      {lines.map((line, lineIdx) => {
+      {lines.map((lineData, lineIdx) => {
+        const line = lineData.notes
         const refStart = line[0].refStartTime
         const refEnd = line[line.length - 1].refEndTime
         const userStarts = line.filter(n => n.userStartTime != null).map(n => n.userStartTime!)
@@ -288,6 +325,15 @@ function NoteLineComparison({
 
         return (
           <div key={lineIdx} className="rounded-lg border border-border/30 bg-surface/30 px-2.5 py-1.5 space-y-1">
+            {/* Lyric text + timestamp header */}
+            <div className="flex items-center justify-between gap-2">
+              {lineData.lyric && (
+                <span className="text-[10px] text-text-muted/70 truncate" dir="rtl">{lineData.lyric}</span>
+              )}
+              <span className="shrink-0 text-[9px] text-text-muted/50 tabular-nums">
+                {formatTime(refStart)}–{formatTime(refEnd)}
+              </span>
+            </div>
             {/* Reference line */}
             <div className="flex items-center gap-1.5">
               <button
@@ -295,7 +341,7 @@ function NoteLineComparison({
                 className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium ${
                   isPlayingRefLine ? 'bg-primary/20 text-primary' : 'text-text-muted hover:bg-primary/10'
                 }`}
-                title={`Play ref ${refStart.toFixed(1)}s–${refEnd.toFixed(1)}s`}
+                title={`Play ref ${formatTime(refStart)}–${formatTime(refEnd)}`}
               >
                 {isPlayingRefLine ? '...' : '▶ Ref'}
               </button>
@@ -377,6 +423,8 @@ export default function SectionTimeline({
   refAudioUrl,
   userAudioUrl,
   noteComparison,
+  lyricLines,
+  lineTimestamps,
 }: SectionTimelineProps) {
   const [showNotes, setShowNotes] = useState(false)
   const [playingSnippet, setPlayingSnippet] = useState<{
@@ -583,6 +631,8 @@ export default function SectionTimeline({
                 notes={noteComparison!}
                 playSnippet={playSnippet}
                 playingSnippet={playingSnippet}
+                lyricLines={lyricLines}
+                lineTimestamps={lineTimestamps}
               />
             </div>
           )}

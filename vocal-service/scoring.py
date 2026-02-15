@@ -219,7 +219,7 @@ def _cents_between(hz_a: float, hz_b: float) -> float:
 # - Same pitch class different octave: also green (octave-tolerant)
 # - Beyond that: wrong note (red)
 # 80 cents is generous but excludes a full semitone (100 cents) which is a wrong note.
-_NOTE_MATCH_CENTS = 80.0
+_NOTE_MATCH_CENTS = 100.0
 
 
 def _align_notes(
@@ -385,7 +385,7 @@ WEIGHT_DYNAMICS = 0.15
 # Pitch: up to 100 cents (~semitone) = 100 score; > 400 cents = 0
 # Relaxed for amateur choir singers — singing the right note is what
 # matters most, not perfect intonation.
-PITCH_PERFECT_CENTS = 100.0
+PITCH_PERFECT_CENTS = 150.0
 PITCH_ZERO_CENTS = 400.0
 
 # Timing: up to 500 ms offset = 100 score; > 2s = 0

@@ -793,6 +793,8 @@ export default function FullSongRecordingPanel({
                 refAudioUrl={refVocalUrl || result.isolatedVocalUrl}
                 userAudioUrl={useHeadphones ? (recordingBlobUrl || result.originalRecordingUrl) : (result.isolatedVocalUrl || recordingBlobUrl)}
                 noteComparison={result.noteComparison}
+                lyricLines={chunks.flatMap(c => c.lyrics.split('\n').filter(Boolean))}
+                lineTimestamps={chunks.flatMap(c => c.lineTimestamps ?? [])}
               />
             )}
 

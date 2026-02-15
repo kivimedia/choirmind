@@ -19,6 +19,7 @@ interface ChunkInfo {
   lyrics: string
   audioStartMs?: number | null
   audioEndMs?: number | null
+  lineTimestamps?: number[] | null
 }
 
 interface SectionScoreData {
@@ -771,6 +772,8 @@ export default function ChunkRecordingPanel({
                 refAudioUrl={refVocalUrl || result.isolatedVocalUrl}
                 userAudioUrl={useHeadphones ? (recordingBlobUrl || result.originalRecordingUrl) : (result.isolatedVocalUrl || recordingBlobUrl)}
                 noteComparison={result.noteComparison}
+                lyricLines={chunk.lyrics.split('\n').filter(Boolean)}
+                lineTimestamps={chunk.lineTimestamps ?? undefined}
               />
             )}
 
