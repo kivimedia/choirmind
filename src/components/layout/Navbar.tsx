@@ -57,6 +57,7 @@ export default function Navbar() {
     { href: '/', label: t('home') },
     { href: '/songs', label: t('songs') },
     { href: '/practice', label: t('practice') },
+    { href: '/vocal-practice/history', label: t('recordings') },
     { href: '/dashboard', label: t('dashboard') },
   ]
 
