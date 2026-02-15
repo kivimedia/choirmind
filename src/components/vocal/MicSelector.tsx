@@ -22,7 +22,7 @@ export default function MicSelector({ selectedDeviceId, onSelect }: MicSelectorP
 
         const all = await navigator.mediaDevices.enumerateDevices()
         if (cancelled) return
-        const mics = all.filter(d => d.kind === 'audioinput' && d.deviceId)
+        const mics = all.filter(d => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'communications')
         setDevices(mics)
 
         // Auto-select first if nothing selected
@@ -49,7 +49,7 @@ export default function MicSelector({ selectedDeviceId, onSelect }: MicSelectorP
     )
   }
 
-  if (devices.length <= 1) return null
+  if (devices.length === 0) return null
 
   return (
     <div className="space-y-1">
