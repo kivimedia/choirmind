@@ -256,6 +256,13 @@ export default function Navbar() {
                     {t('recordings')}
                   </Link>
                   <Link
+                    href="/pricing"
+                    className="block px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-surface-hover"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    {t('pricing')}
+                  </Link>
+                  <Link
                     href="/profile"
                     className="block px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-surface-hover"
                     onClick={() => setUserMenuOpen(false)}
@@ -444,6 +451,13 @@ export default function Navbar() {
                 onClick={() => setMobileMenuOpen(false)}
               >
                 {t('recordings')}
+              </Link>
+              <Link
+                href="/pricing"
+                className="rounded-lg px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-surface-hover"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                {t('pricing')}
               </Link>
               <Link
                 href="/profile"

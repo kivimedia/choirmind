@@ -138,18 +138,28 @@ export default function VocalHistoryPage() {
           <div className="space-y-2">
             <div className="flex items-center justify-between text-sm">
               <span className="text-text-muted">קרדיט ניתוח קולי</span>
-              {quota.hasChoirSubscription ? (
-                <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">
-                  ללא הגבלה
-                </span>
-              ) : (
-                <span className="text-foreground font-medium tabular-nums" dir="ltr">
-                  {Math.floor(quota.freeSecondsUsed / 60)}:{(quota.freeSecondsUsed % 60).toString().padStart(2, '0')}
-                  {' / '}
-                  {Math.floor(quota.totalAllowance / 60)}:{(quota.totalAllowance % 60).toString().padStart(2, '0')}
-                  {' דקות'}
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {quota.hasChoirSubscription ? (
+                  <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                    ללא הגבלה
+                  </span>
+                ) : (
+                  <>
+                    <span className="text-foreground font-medium tabular-nums" dir="ltr">
+                      {Math.floor(quota.freeSecondsUsed / 60)}:{(quota.freeSecondsUsed % 60).toString().padStart(2, '0')}
+                      {' / '}
+                      {Math.floor(quota.totalAllowance / 60)}:{(quota.totalAllowance % 60).toString().padStart(2, '0')}
+                      {' דקות'}
+                    </span>
+                    <Link
+                      href="/pricing"
+                      className="text-xs font-medium bg-primary text-white px-2.5 py-1 rounded-lg hover:bg-primary-dark transition-colors"
+                    >
+                      הוסיפו דקות
+                    </Link>
+                  </>
+                )}
+              </div>
             </div>
             {!quota.hasChoirSubscription && (() => {
               const pct = Math.min(100, Math.round((quota.freeSecondsUsed / quota.totalAllowance) * 100))
