@@ -15,6 +15,7 @@ interface EmailLog {
   error: string | null
   provider: string
   context: string
+  metadata: string | null
   createdAt: string
 }
 
@@ -24,6 +25,7 @@ export default function AdminEmailLogsPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
 
   const isAdmin = session?.user?.role === 'admin'
 
@@ -53,6 +55,22 @@ export default function AdminEmailLogsPage() {
     const timeout = setTimeout(() => fetchLogs(search, statusFilter), 300)
     return () => clearTimeout(timeout)
   }, [search, statusFilter, isAdmin, fetchLogs])
+
+  function getMetadataUrl(metadata: string | null): string | null {
+    if (!metadata) return null
+    try {
+      const parsed = JSON.parse(metadata)
+      return parsed.url || null
+    } catch {
+      return null
+    }
+  }
+
+  async function copyToClipboard(text: string, logId: string) {
+    await navigator.clipboard.writeText(text)
+    setCopiedId(logId)
+    setTimeout(() => setCopiedId(null), 2000)
+  }
 
   if (!isAdmin) {
     return (
@@ -89,73 +107,64 @@ export default function AdminEmailLogsPage() {
         </select>
       </div>
 
-      {/* Logs table */}
-      <Card className="overflow-x-auto">
+      {/* Logs */}
+      <div className="space-y-3">
         {loading ? (
-          <div className="animate-pulse space-y-3 py-4">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-10 rounded bg-border/30" />
-            ))}
-          </div>
+          <Card>
+            <div className="animate-pulse space-y-3 py-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-16 rounded bg-border/30" />
+              ))}
+            </div>
+          </Card>
         ) : logs.length === 0 ? (
-          <p className="py-8 text-center text-text-muted">לא נמצאו אימיילים</p>
+          <Card>
+            <p className="py-8 text-center text-text-muted">לא נמצאו אימיילים</p>
+          </Card>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-start text-text-muted">
-                <th className="px-3 py-3 text-start font-medium">תאריך</th>
-                <th className="px-3 py-3 text-start font-medium">נמען</th>
-                <th className="px-3 py-3 text-start font-medium">נושא</th>
-                <th className="px-3 py-3 text-start font-medium">סוג</th>
-                <th className="px-3 py-3 text-start font-medium">סטטוס</th>
-                <th className="px-3 py-3 text-start font-medium">פרטים</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.map((log) => {
-                const date = new Date(log.createdAt)
-                return (
-                  <tr key={log.id} className="border-b border-border/50 last:border-0">
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <div>
-                        <p className="text-foreground">
-                          {date.toLocaleDateString('he-IL')}
-                        </p>
-                        <p className="text-xs text-text-muted">
-                          {date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                        </p>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="text-foreground">{log.to}</span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="text-foreground">{log.subject}</span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <Badge variant="default">{log.context}</Badge>
-                    </td>
-                    <td className="px-3 py-3">
+          logs.map((log) => {
+            const date = new Date(log.createdAt)
+            const magicLink = getMetadataUrl(log.metadata)
+            const isCopied = copiedId === log.id
+
+            return (
+              <Card key={log.id} className="!p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-foreground">{log.to}</span>
                       <Badge variant={log.status === 'sent' ? 'primary' : 'default'}>
                         {log.status === 'sent' ? 'נשלח' : log.status === 'failed' ? 'נכשל' : log.status}
                       </Badge>
-                    </td>
-                    <td className="px-3 py-3">
-                      {log.error ? (
-                        <span className="text-xs text-danger">{log.error}</span>
-                      ) : log.resendId ? (
-                        <span className="text-xs text-text-muted font-mono">{log.resendId}</span>
-                      ) : (
-                        <span className="text-xs text-text-muted">—</span>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                      <Badge variant="default">{log.context}</Badge>
+                    </div>
+                    <p className="text-xs text-text-muted mt-1">
+                      {date.toLocaleDateString('he-IL')}{' '}
+                      {date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      {' · '}{log.subject}
+                    </p>
+                    {log.error && (
+                      <p className="text-xs text-danger mt-1">{log.error}</p>
+                    )}
+                    {log.resendId && !log.error && (
+                      <p className="text-xs text-text-muted mt-1 font-mono">{log.resendId}</p>
+                    )}
+                  </div>
+                  {magicLink && (
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(magicLink, log.id)}
+                      className="shrink-0 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-surface-hover"
+                    >
+                      {isCopied ? 'הועתק!' : 'העתק קישור'}
+                    </button>
+                  )}
+                </div>
+              </Card>
+            )
+          })
         )}
-      </Card>
+      </div>
     </div>
   )
 }

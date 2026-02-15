@@ -8,9 +8,10 @@ interface SendEmailParams {
   subject: string
   html: string
   context?: string
+  metadata?: Record<string, string>
 }
 
-export async function sendEmail({ to, subject, html, context = 'magic-link' }: SendEmailParams) {
+export async function sendEmail({ to, subject, html, context = 'magic-link', metadata }: SendEmailParams) {
   const from = process.env.EMAIL_FROM || 'ChoirMind <noreply@dailycookie.co>'
 
   console.log(`[EMAIL] Attempting to send email:`)
@@ -32,9 +33,10 @@ export async function sendEmail({ to, subject, html, context = 'magic-link' }: S
     console.log(`[EMAIL] Resend response:`, JSON.stringify(result, null, 2))
 
     // Log to DB
+    const metadataJson = metadata ? JSON.stringify(metadata) : null
     await prisma.$executeRaw`
-      INSERT INTO "EmailLog" (id, "to", "from", subject, status, "resendId", error, provider, context, "createdAt")
-      VALUES (${crypto.randomUUID()}, ${to}, ${from}, ${subject}, 'sent', ${(result as any).data?.id || null}, ${null}, 'resend', ${context}, NOW())
+      INSERT INTO "EmailLog" (id, "to", "from", subject, status, "resendId", error, provider, context, metadata, "createdAt")
+      VALUES (${crypto.randomUUID()}, ${to}, ${from}, ${subject}, 'sent', ${(result as any).data?.id || null}, ${null}, 'resend', ${context}, ${metadataJson}, NOW())
     `
 
     return { success: true, data: result }
@@ -45,9 +47,10 @@ export async function sendEmail({ to, subject, html, context = 'magic-link' }: S
 
     // Log failure to DB
     try {
+      const metadataJson = metadata ? JSON.stringify(metadata) : null
       await prisma.$executeRaw`
-        INSERT INTO "EmailLog" (id, "to", "from", subject, status, "resendId", error, provider, context, "createdAt")
-        VALUES (${crypto.randomUUID()}, ${to}, ${from}, ${subject}, 'failed', ${null}, ${errorMessage}, 'resend', ${context}, NOW())
+        INSERT INTO "EmailLog" (id, "to", "from", subject, status, "resendId", error, provider, context, metadata, "createdAt")
+        VALUES (${crypto.randomUUID()}, ${to}, ${from}, ${subject}, 'failed', ${null}, ${errorMessage}, 'resend', ${context}, ${metadataJson}, NOW())
       `
     } catch (logErr) {
       console.error(`[EMAIL] Failed to log to DB:`, logErr)

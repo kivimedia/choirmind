@@ -44,6 +44,7 @@ export const authOptions: NextAuthOptions = {
             </div>
           `,
           context: 'magic-link',
+          metadata: { url },
         })
 
         if (!result.success) {

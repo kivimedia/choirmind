@@ -252,6 +252,7 @@ model EmailLog {
   error      String?  // Error message if failed
   provider   String   @default("resend") // resend, test
   context    String   @default("magic-link") // magic-link, test, etc.
+  metadata   String?  // JSON string for extra data (e.g. magic link URL)
   createdAt  DateTime @default(now())
 }
 
