@@ -810,6 +810,13 @@ export default function FullSongRecordingPanel({
                       src={useHeadphones ? (recordingBlobUrl || result.originalRecordingUrl!) : (result.isolatedVocalUrl || recordingBlobUrl!)}
                       className="w-full h-10"
                       preload="auto"
+                      onLoadedMetadata={(e) => {
+                        const el = e.currentTarget
+                        if (!isFinite(el.duration)) {
+                          el.currentTime = 1e101
+                          el.ontimeupdate = () => { el.ontimeupdate = null; el.currentTime = 0 }
+                        }
+                      }}
                     />
                   </div>
                 )}
