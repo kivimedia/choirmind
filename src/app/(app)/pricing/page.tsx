@@ -81,8 +81,8 @@ export default function PricingPage() {
   }
 
   const usedMin = Math.floor((quota?.freeSecondsUsed ?? 0) / 60)
-  const totalMin = Math.floor((quota?.totalAllowance ?? 3600) / 60)
-  const remainMin = Math.floor((quota?.totalRemaining ?? 3600) / 60)
+  const totalMin = Math.floor((quota?.totalAllowance ?? 1200) / 60)
+  const remainMin = Math.floor((quota?.totalRemaining ?? 1200) / 60)
 
   return (
     <div className="mx-auto max-w-4xl space-y-8">

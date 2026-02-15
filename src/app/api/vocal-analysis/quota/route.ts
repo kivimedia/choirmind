@@ -23,7 +23,7 @@ export async function GET() {
         data: {
           userId,
           freeSecondsUsed: 0,
-          freeSecondsLimit: 3600,
+          freeSecondsLimit: 1200,
         },
       })
     }

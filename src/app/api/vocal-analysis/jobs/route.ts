@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
         data: {
           userId,
           freeSecondsUsed: 0,
-          freeSecondsLimit: 3600,
+          freeSecondsLimit: 1200,
         },
       })
     }

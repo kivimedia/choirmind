@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
               create: {
                 userId,
                 freeSecondsUsed: 0,
-                freeSecondsLimit: 3600,
+                freeSecondsLimit: 1200,
                 purchasedSeconds: seconds,
               },
               update: {
