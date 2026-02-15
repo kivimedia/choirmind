@@ -773,7 +773,11 @@ export default function ChunkRecordingPanel({
                 userAudioUrl={useHeadphones ? (recordingBlobUrl || result.originalRecordingUrl) : (result.isolatedVocalUrl || recordingBlobUrl)}
                 noteComparison={result.noteComparison}
                 lyricLines={chunk.lyrics.split('\n').filter(Boolean)}
-                lineTimestamps={chunk.lineTimestamps ?? undefined}
+                lineTimestamps={chunk.lineTimestamps ? (() => {
+                  // lineTimestamps are absolute to song; subtract chunk start to get 0-based
+                  const offset = chunk.audioStartMs ?? chunk.lineTimestamps![0] ?? 0
+                  return chunk.lineTimestamps!.map(t => t - offset)
+                })() : undefined}
               />
             )}
 

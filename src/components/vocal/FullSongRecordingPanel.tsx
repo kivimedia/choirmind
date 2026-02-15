@@ -794,7 +794,13 @@ export default function FullSongRecordingPanel({
                 userAudioUrl={useHeadphones ? (recordingBlobUrl || result.originalRecordingUrl) : (result.isolatedVocalUrl || recordingBlobUrl)}
                 noteComparison={result.noteComparison}
                 lyricLines={chunks.flatMap(c => c.lyrics.split('\n').filter(Boolean))}
-                lineTimestamps={chunks.flatMap(c => c.lineTimestamps ?? [])}
+                lineTimestamps={(() => {
+                  // Flatten all chunks' lineTimestamps, keeping them absolute (ms)
+                  // then subtract the global offset so the first timestamp = 0
+                  const allTs = chunks.flatMap(c => c.lineTimestamps ?? [])
+                  const offset = allTs.length > 0 ? allTs[0] : 0
+                  return allTs.map(t => t - offset)
+                })()}
               />
             )}
 
