@@ -86,7 +86,7 @@ def _extract_notes(
     rms_values: list | None = None,
     rms_times: list | None = None,
     min_duration_s: float = 0.12,
-    cents_threshold: float = 100.0,
+    cents_threshold: float = 90.0,
     max_time_s: float | None = None,
 ) -> list[dict]:
     """Extract individual note events from a pitch contour.
@@ -215,10 +215,11 @@ def _cents_between(hz_a: float, hz_b: float) -> float:
 
 
 # Match thresholds for note comparison (generous for amateur singers):
-# - Within 100 cents (1 semitone): "noteMatch" (green) — you hit the right note
-# - Within 150 cents but same pitch class: "pitchClassMatch" (yellow) — right note, wrong octave
+# - Within 80 cents: "noteMatch" (green) — you hit the right note
+# - Same pitch class different octave: also green (octave-tolerant)
 # - Beyond that: wrong note (red)
-_NOTE_MATCH_CENTS = 100.0
+# 80 cents is generous but excludes a full semitone (100 cents) which is a wrong note.
+_NOTE_MATCH_CENTS = 80.0
 
 
 def _align_notes(
