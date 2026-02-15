@@ -17,16 +17,16 @@ interface QuotaInfo {
   canTopUp: boolean
 }
 
-const PLANS: Array<{ id: string; name: string; minutes: number; price: string; priceNum: number; recommended?: boolean }> = [
-  { id: 'starter', name: 'Starter', minutes: 30, price: '$10', priceNum: 10 },
-  { id: 'pro', name: 'Pro', minutes: 150, price: '$30', priceNum: 30, recommended: true },
-  { id: 'studio', name: 'Studio', minutes: 500, price: '$90', priceNum: 90 },
+const PLANS: Array<{ id: string; name: string; minutes: number; price: string; priceNum: number; songsHint: string; recommended?: boolean }> = [
+  { id: 'starter', name: 'Starter', minutes: 30, price: '$10', priceNum: 10, songsHint: 'מספיק לכ-10 שירים' },
+  { id: 'pro', name: 'Pro', minutes: 150, price: '$30', priceNum: 30, songsHint: 'מספיק לכ-50 שירים', recommended: true },
+  { id: 'studio', name: 'Studio', minutes: 500, price: '$90', priceNum: 90, songsHint: 'מספיק לכ-165 שירים' },
 ]
 
 const TOPUPS = [
-  { id: 'starter', minutes: 30, price: '$13' },
-  { id: 'pro', minutes: 150, price: '$39' },
-  { id: 'studio', minutes: 500, price: '$117' },
+  { id: 'starter', minutes: 30, price: '$13', songsHint: '~10 שירים' },
+  { id: 'pro', minutes: 150, price: '$39', songsHint: '~50 שירים' },
+  { id: 'studio', minutes: 500, price: '$117', songsHint: '~165 שירים' },
 ]
 
 export default function PricingPage() {
@@ -140,6 +140,7 @@ export default function PricingPage() {
                       {plan.price}<span className="text-sm font-normal text-text-muted">/חודש</span>
                     </p>
                     <p className="text-sm text-text-muted mt-1">{plan.minutes} דקות לחודש</p>
+                    <p className="text-xs text-text-muted/70 mt-0.5">{plan.songsHint}</p>
                   </div>
                   <ul className="space-y-2 text-sm text-text-muted">
                     <li className="flex gap-2"><span className="text-primary">✓</span> דקות עוברות לחודש הבא</li>
@@ -183,7 +184,7 @@ export default function PricingPage() {
             <Card key={pack.id} className="flex items-center justify-between">
               <div>
                 <p className="font-bold text-foreground">{pack.minutes} דקות</p>
-                <p className="text-sm text-text-muted">{pack.price}</p>
+                <p className="text-sm text-text-muted">{pack.price} <span className="text-xs text-text-muted/70">({pack.songsHint})</span></p>
               </div>
               <Button
                 variant="outline"
