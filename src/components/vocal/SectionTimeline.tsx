@@ -56,11 +56,10 @@ function noteMatchIcon(nc: NoteComparison): { symbol: string; color: string } {
   return { symbol: 'X', color: 'text-status-fragile' }
 }
 
-function octaveLabel(nc: NoteComparison): string {
-  if (nc.octaveDiff === null || nc.octaveDiff === undefined) return ''
-  if (nc.octaveDiff === 0) return ''
-  const dir = nc.octaveDiff > 0 ? '+' : ''
-  return `${dir}${nc.octaveDiff} oct`
+/** Strip octave number from note name: "Sol#3" → "Sol#", "Mi2" → "Mi" */
+function stripOctave(note: string | null): string | null {
+  if (!note) return null
+  return note.replace(/\d+$/, '')
 }
 
 // ── Musical Staff Visualization ──────────────────────
@@ -220,6 +219,7 @@ function NoteStaff({
               {rp !== null && (
                 <g className="cursor-pointer" opacity={0.7}
                   onClick={() => playSnippet(nc.refStartTime, nc.refEndTime - nc.refStartTime, 'ref')}>
+                  <circle cx={rx} cy={yOf(rp)} r={12} fill="transparent" />
                   <ellipse cx={rx} cy={yOf(rp)} rx={5} ry={3.5}
                     fill="none" stroke="var(--color-text-muted, #6b7280)" strokeWidth={1.5}
                     transform={`rotate(-15,${rx},${yOf(rp)})`} />
@@ -236,6 +236,7 @@ function NoteStaff({
                   onClick={() => nc.userStartTime != null
                     ? playSnippet(nc.userStartTime, (nc.userEndTime ?? nc.userStartTime + 0.5) - nc.userStartTime, 'user')
                     : undefined}>
+                  <circle cx={ux} cy={yOf(up)} r={12} fill="transparent" />
                   <ellipse cx={ux} cy={yOf(up)} rx={5} ry={3.5}
                     fill={color}
                     transform={`rotate(-15,${ux},${yOf(up)})`} />
@@ -422,18 +423,14 @@ export default function SectionTimeline({
               {/* Summary stats */}
               {(() => {
                 const total = noteComparison!.length
-                const exact = noteComparison!.filter(n => n.noteMatch).length
-                const close = noteComparison!.filter(n => !n.noteMatch && n.pitchClassMatch).length
+                const correct = noteComparison!.filter(n => n.noteMatch || n.pitchClassMatch).length
                 const nearMiss = noteComparison!.filter(n => !n.noteMatch && !n.pitchClassMatch && n.centsOff != null && n.centsOff <= 150).length
                 const wrong = noteComparison!.filter(n => n.userNote && !n.noteMatch && !n.pitchClassMatch && (n.centsOff == null || n.centsOff > 150)).length
                 const missed = noteComparison!.filter(n => !n.userNote).length
-                const pct = total > 0 ? Math.round(((exact + close + nearMiss) / total) * 100) : 0
+                const pct = total > 0 ? Math.round(((correct + nearMiss) / total) * 100) : 0
                 return (
                   <div className="flex items-center gap-3 text-[11px] mb-1.5 flex-wrap">
-                    <span className="text-status-solid font-medium">{`${exact} מדויק`}</span>
-                    {close > 0 && (
-                      <span className="text-status-developing font-medium">{`${close} קרוב (אוקטבה)`}</span>
-                    )}
+                    <span className="text-status-solid font-medium">{`${correct} מדויק`}</span>
                     {nearMiss > 0 && (
                       <span className="text-status-developing font-medium">{`${nearMiss} כמעט`}</span>
                     )}
@@ -455,7 +452,6 @@ export default function SectionTimeline({
                     <th className="px-1.5 py-1 text-center font-medium border-b border-border">Reference</th>
                     <th className="px-1.5 py-1 text-center font-medium border-b border-border">You</th>
                     <th className="px-1.5 py-1 text-center font-medium border-b border-border">Match</th>
-                    <th className="px-1.5 py-1 text-center font-medium border-b border-border">Octave</th>
                     <th className="px-1.5 py-1 text-center font-medium border-b border-border">Timing</th>
                   </tr>
                 </thead>
@@ -464,7 +460,6 @@ export default function SectionTimeline({
                     const { symbol, color } = noteMatchIcon(nc)
                     const isPlayingRef = playingSnippet?.time === nc.refStartTime && playingSnippet?.type === 'ref'
                     const isPlayingUser = playingSnippet?.time === (nc.userStartTime ?? -1) && playingSnippet?.type === 'user'
-                    const octLabel = octaveLabel(nc)
 
                     return (
                       <tr
@@ -483,7 +478,7 @@ export default function SectionTimeline({
                               }`}
                               title={`Play ref ${nc.refStartTime.toFixed(1)}s`}
                             >
-                              {isPlayingRef ? '...' : nc.refNote}
+                              {isPlayingRef ? '...' : stripOctave(nc.refNote)}
                             </button>
                           ) : (
                             <span className="text-text-muted/40">-</span>
@@ -498,7 +493,7 @@ export default function SectionTimeline({
                               } ${color}`}
                               title={`Play yours ${nc.userStartTime.toFixed(1)}s`}
                             >
-                              {isPlayingUser ? '...' : nc.userNote}
+                              {isPlayingUser ? '...' : stripOctave(nc.userNote)}
                             </button>
                           ) : (
                             <span className="text-text-muted/40">-</span>
@@ -506,23 +501,6 @@ export default function SectionTimeline({
                         </td>
                         <td className={`px-1.5 py-0.5 text-center border-b border-border/30 font-medium ${color}`}>
                           {symbol}
-                        </td>
-                        <td className="px-1.5 py-0.5 text-center border-b border-border/30">
-                          {octLabel ? (
-                            <span className={nc.octaveDiff === 0 ? 'text-status-solid' : 'text-status-developing'}>
-                              {octLabel}
-                            </span>
-                          ) : nc.centsOff != null && nc.userNote ? (
-                            <span className={nc.centsOff <= 50 ? 'text-status-solid text-[10px]' : nc.centsOff <= 100 ? 'text-status-developing text-[10px]' : 'text-status-fragile text-[10px]'}>
-                              {nc.centsOff <= 50 ? 'OK' : `${Math.round(nc.centsOff)}¢`}
-                            </span>
-                          ) : (
-                            nc.noteMatch ? (
-                              <span className="text-status-solid text-[10px]">OK</span>
-                            ) : (
-                              <span className="text-text-muted/40">-</span>
-                            )
-                          )}
                         </td>
                         <td className="px-1.5 py-0.5 text-center border-b border-border/30 tabular-nums text-[10px]">
                           {nc.timingOffsetMs != null ? (

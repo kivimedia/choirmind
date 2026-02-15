@@ -203,10 +203,15 @@ def _extract_notes(
 
 
 def _cents_between(hz_a: float, hz_b: float) -> float:
-    """Absolute cents distance between two frequencies."""
+    """Absolute cents distance between two frequencies (octave-folded).
+
+    Folds the interval into ±600 cents so that octave differences
+    (1200 cents) are treated as 0.  Mi3 vs Mi2 = 0 cents.
+    """
     if hz_a <= 0 or hz_b <= 0:
         return 9999.0
-    return abs(1200.0 * math.log2(hz_a / hz_b))
+    raw = 1200.0 * math.log2(hz_a / hz_b)
+    return abs(((raw + 600) % 1200) - 600)
 
 
 # Match thresholds for note comparison (generous for amateur singers):
