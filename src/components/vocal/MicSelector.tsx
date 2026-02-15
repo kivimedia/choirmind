@@ -32,9 +32,11 @@ export default function MicSelector({ selectedDeviceId, onSelect }: MicSelectorP
         const mics = all.filter(d => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'communications')
         setDevices(mics)
 
-        // Auto-select first if nothing selected
+        // Restore saved mic or auto-select first
         if (!selectedDeviceId && mics.length > 0) {
-          onSelect(mics[0].deviceId)
+          const saved = localStorage.getItem('choirmind-mic-id')
+          const match = saved ? mics.find(m => m.deviceId === saved) : null
+          onSelect(match ? match.deviceId : mics[0].deviceId)
         }
       } catch {
         // Permission denied or no devices — leave empty
@@ -139,7 +141,9 @@ export default function MicSelector({ selectedDeviceId, onSelect }: MicSelectorP
         <select
           value={selectedDeviceId || ''}
           onChange={(e) => {
-            onSelect(e.target.value || null)
+            const id = e.target.value || null
+            if (id) localStorage.setItem('choirmind-mic-id', id)
+            onSelect(id)
             if (testing) stopTest()
           }}
           disabled={testing}
