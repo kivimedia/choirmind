@@ -225,27 +225,54 @@ _NOTE_MATCH_CENTS = 80.0
 def _align_notes(
     ref_notes: list[dict],
     user_notes: list[dict],
-    tolerance_s: float = 2.0,
+    alignment: dict | None = None,
+    user_pitch_times: list | None = None,
+    ref_pitch_times: list | None = None,
+    tolerance_s: float = 1.5,
 ) -> list[dict]:
-    """Align reference notes to user notes sequentially.
+    """Align reference notes to user notes using DTW time mapping.
 
-    For each reference note, find the best matching user note within
-    a timing tolerance window.  Returns a list of aligned pairs.
+    Instead of greedy sequential matching (where one missed note throws
+    off everything after it), this uses the DTW alignment path to map
+    reference timestamps to user timestamps.  Each reference note
+    independently finds its closest user note via the warped time axis.
 
-    Matching is Hz-based (within 100 cents = 1 semitone) rather than
-    exact note-name comparison, so a singer who is 50 cents flat still
-    gets credit for hitting the right note.
+    Falls back to raw timestamp matching when no DTW alignment is
+    available (standalone mode).
     """
+    # Build DTW time mapping: ref_time → user_time via interpolation
+    map_fn = None
+    if alignment and user_pitch_times and ref_pitch_times:
+        path = alignment.get("path", [])
+        dtw_ref_t: list[float] = []
+        dtw_user_t: list[float] = []
+        for u_idx, r_idx in path:
+            if u_idx < len(user_pitch_times) and r_idx < len(ref_pitch_times):
+                dtw_ref_t.append(float(ref_pitch_times[r_idx]))
+                dtw_user_t.append(float(user_pitch_times[u_idx]))
+        if dtw_ref_t:
+            ref_arr = np.array(dtw_ref_t)
+            usr_arr = np.array(dtw_user_t)
+            map_fn = lambda t: float(np.interp(t, ref_arr, usr_arr))
+            logger.info(
+                "DTW note alignment: mapping %d path points, ref [%.1f-%.1f]s → user [%.1f-%.1f]s",
+                len(dtw_ref_t), ref_arr[0], ref_arr[-1], usr_arr[0], usr_arr[-1],
+            )
+
     aligned: list[dict] = []
-    u_start = 0
+    used: set[int] = set()
 
     for r_idx, ref in enumerate(ref_notes):
+        # Map reference time to expected user time via DTW
+        expected_t = map_fn(ref["startTime"]) if map_fn else ref["startTime"]
+
+        # Search ALL user notes for closest to expected time (not just forward)
         best_match: int | None = None
         best_time_diff = float("inf")
-
-        # Search ahead in user notes for a match
-        for j in range(u_start, min(u_start + 8, len(user_notes))):
-            time_diff = abs(user_notes[j]["startTime"] - ref["startTime"])
+        for j, user in enumerate(user_notes):
+            if j in used:
+                continue
+            time_diff = abs(user["startTime"] - expected_t)
             if time_diff <= tolerance_s and time_diff < best_time_diff:
                 best_match = j
                 best_time_diff = time_diff
@@ -254,19 +281,15 @@ def _align_notes(
         ref_oct = _octave_num(ref["note"])
 
         if best_match is not None:
+            used.add(best_match)
             user = user_notes[best_match]
             user_class = _note_class(user["note"])
             user_oct = _octave_num(user["note"])
 
-            # Hz-based matching: compare actual frequencies, not note names
             cents_off = _cents_between(ref.get("hz", 0), user.get("hz", 0))
             note_match = cents_off <= _NOTE_MATCH_CENTS
 
-            # Pitch class match: same note name regardless of octave
             pitch_class_match = (ref_class == user_class) if ref_class and user_class else None
-
-            # If Hz match but note names differ (edge case at semitone boundary),
-            # still count as pitch class match
             if note_match and not pitch_class_match:
                 pitch_class_match = True
 
@@ -284,9 +307,8 @@ def _align_notes(
                 "pitchClassMatch": pitch_class_match,
                 "octaveDiff": octave_diff,
                 "centsOff": round(cents_off, 1),
-                "timingOffsetMs": round((user["startTime"] - ref["startTime"]) * 1000),
+                "timingOffsetMs": round((user["startTime"] - expected_t) * 1000),
             })
-            u_start = best_match + 1
         else:
             aligned.append({
                 "noteIndex": r_idx,
@@ -386,7 +408,12 @@ def score_recording(
             rms_values=user_features.get("rms_values"),
             rms_times=user_features.get("rms_times"),
         )
-        note_comparison = _align_notes(ref_notes, user_notes)
+        note_comparison = _align_notes(
+            ref_notes, user_notes,
+            alignment=alignment,
+            user_pitch_times=user_features.get("pitch_times", []),
+            ref_pitch_times=ref_features.get("pitch_times", []),
+        )
         logger.info(
             "Note comparison: %d ref notes, %d user notes, %d aligned pairs",
             len(ref_notes), len(user_notes), len(note_comparison),
