@@ -230,15 +230,13 @@ def _align_notes(
     ref_pitch_times: list | None = None,
     tolerance_s: float = 1.5,
 ) -> list[dict]:
-    """Align reference notes to user notes using DTW time mapping.
+    """Align reference notes to user notes using DTW time mapping + pitch.
 
-    Instead of greedy sequential matching (where one missed note throws
-    off everything after it), this uses the DTW alignment path to map
-    reference timestamps to user timestamps.  Each reference note
-    independently finds its closest user note via the warped time axis.
-
-    Falls back to raw timestamp matching when no DTW alignment is
-    available (standalone mode).
+    Uses the DTW alignment path to map reference timestamps to user
+    timestamps, then scores candidates by BOTH time proximity and pitch
+    similarity (70% pitch, 30% time).  This prevents a single mistake
+    from throwing off everything — each ref note independently finds its
+    best match considering what it actually sounds like.
     """
     # Build DTW time mapping: ref_time → user_time via interpolation
     map_fn = None
@@ -254,10 +252,6 @@ def _align_notes(
             ref_arr = np.array(dtw_ref_t)
             usr_arr = np.array(dtw_user_t)
             map_fn = lambda t: float(np.interp(t, ref_arr, usr_arr))
-            logger.info(
-                "DTW note alignment: mapping %d path points, ref [%.1f-%.1f]s → user [%.1f-%.1f]s",
-                len(dtw_ref_t), ref_arr[0], ref_arr[-1], usr_arr[0], usr_arr[-1],
-            )
 
     aligned: list[dict] = []
     used: set[int] = set()
@@ -266,16 +260,21 @@ def _align_notes(
         # Map reference time to expected user time via DTW
         expected_t = map_fn(ref["startTime"]) if map_fn else ref["startTime"]
 
-        # Search ALL user notes for closest to expected time (not just forward)
+        # Score candidates by combined time + pitch similarity
         best_match: int | None = None
-        best_time_diff = float("inf")
+        best_score = float("inf")
         for j, user in enumerate(user_notes):
             if j in used:
                 continue
             time_diff = abs(user["startTime"] - expected_t)
-            if time_diff <= tolerance_s and time_diff < best_time_diff:
+            if time_diff > tolerance_s:
+                continue
+            pitch_diff = _cents_between(ref.get("hz", 0), user.get("hz", 0))
+            # Combined score: pitch matters more than time
+            score = (time_diff / tolerance_s) * 0.3 + min(pitch_diff / 600.0, 1.0) * 0.7
+            if score < best_score:
                 best_match = j
-                best_time_diff = time_diff
+                best_score = score
 
         ref_class = _note_class(ref["note"])
         ref_oct = _octave_num(ref["note"])

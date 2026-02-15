@@ -268,6 +268,131 @@ function NoteStaff({
   )
 }
 
+// ── Line-by-line Note Comparison ──────────────────────
+
+function NoteLineComparison({
+  notes,
+  playSnippet,
+  playingSnippet,
+}: {
+  notes: NoteComparison[]
+  playSnippet: (startSec: number, duration: number, type: 'ref' | 'user') => void
+  playingSnippet: { time: number; type: 'ref' | 'user' } | null
+}) {
+  if (notes.length === 0) return null
+
+  // Group notes into lines: split at time gaps > 0.8s or every 5 notes
+  const lines: NoteComparison[][] = []
+  let current: NoteComparison[] = []
+  for (let i = 0; i < notes.length; i++) {
+    if (current.length > 0) {
+      const gap = notes[i].refStartTime - notes[i - 1].refEndTime
+      if (gap > 0.8 || current.length >= 5) {
+        lines.push(current)
+        current = []
+      }
+    }
+    current.push(notes[i])
+  }
+  if (current.length > 0) lines.push(current)
+
+  return (
+    <div className="space-y-2" dir="ltr">
+      {lines.map((line, lineIdx) => {
+        const refStart = line[0].refStartTime
+        const refEnd = line[line.length - 1].refEndTime
+        const userStarts = line.filter(n => n.userStartTime != null).map(n => n.userStartTime!)
+        const userEnds = line.filter(n => n.userEndTime != null).map(n => n.userEndTime!)
+        const userStart = userStarts.length > 0 ? Math.min(...userStarts) : null
+        const userEnd = userEnds.length > 0 ? Math.max(...userEnds) : null
+
+        const isPlayingRefLine = playingSnippet?.type === 'ref' &&
+          playingSnippet.time >= refStart - 0.01 && playingSnippet.time <= refEnd + 0.01
+        const isPlayingUserLine = userStart != null && playingSnippet?.type === 'user' &&
+          playingSnippet.time >= userStart - 0.01 && playingSnippet.time <= (userEnd ?? userStart) + 0.01
+
+        return (
+          <div key={lineIdx} className="rounded-lg border border-border/30 bg-surface/30 px-2.5 py-1.5 space-y-1">
+            {/* Reference line */}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => playSnippet(refStart, refEnd - refStart + 0.3, 'ref')}
+                className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                  isPlayingRefLine ? 'bg-primary/20 text-primary' : 'text-text-muted hover:bg-primary/10'
+                }`}
+                title={`Play ref ${refStart.toFixed(1)}s–${refEnd.toFixed(1)}s`}
+              >
+                {isPlayingRefLine ? '...' : '▶ Ref'}
+              </button>
+              <div className="flex items-center gap-0.5 flex-wrap">
+                {line.map((nc) => {
+                  const isPlaying = playingSnippet?.time === nc.refStartTime && playingSnippet?.type === 'ref'
+                  return (
+                    <button
+                      key={nc.noteIndex}
+                      onClick={() => playSnippet(nc.refStartTime, nc.refEndTime - nc.refStartTime, 'ref')}
+                      className={`font-mono text-[11px] leading-tight px-1 py-0.5 rounded border transition-colors ${
+                        isPlaying
+                          ? 'border-primary bg-primary/20 text-primary'
+                          : 'border-border/40 text-text-muted hover:bg-primary/10'
+                      }`}
+                    >
+                      {stripOctave(nc.refNote) || '·'}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* User line */}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => userStart != null ? playSnippet(userStart, (userEnd ?? userStart + 1) - userStart + 0.3, 'user') : undefined}
+                disabled={userStart == null}
+                className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                  isPlayingUserLine ? 'bg-primary/20 text-primary'
+                    : userStart != null ? 'text-text-muted hover:bg-primary/10' : 'text-text-muted/30'
+                }`}
+                title={userStart != null ? `Play yours ${userStart.toFixed(1)}s–${(userEnd ?? userStart).toFixed(1)}s` : ''}
+              >
+                {isPlayingUserLine ? '...' : '▶ You'}
+              </button>
+              <div className="flex items-center gap-0.5 flex-wrap">
+                {line.map((nc) => {
+                  const { color } = noteMatchIcon(nc)
+                  const isPlaying = nc.userStartTime != null &&
+                    playingSnippet?.time === nc.userStartTime && playingSnippet?.type === 'user'
+                  const isMatch = nc.noteMatch || nc.pitchClassMatch
+                  return (
+                    <button
+                      key={nc.noteIndex}
+                      onClick={() => nc.userStartTime != null
+                        ? playSnippet(nc.userStartTime, (nc.userEndTime ?? nc.userStartTime + 0.5) - nc.userStartTime, 'user')
+                        : undefined}
+                      disabled={!nc.userNote}
+                      className={`font-mono text-[11px] leading-tight px-1 py-0.5 rounded border transition-colors ${
+                        isPlaying
+                          ? 'border-primary bg-primary/20 text-primary'
+                          : isMatch
+                            ? 'border-status-solid/40 bg-status-solid/10'
+                            : nc.userNote
+                              ? 'border-status-fragile/40 bg-status-fragile/10'
+                              : 'border-border/20 text-text-muted/30'
+                      } ${!isPlaying ? color : ''}`}
+                    >
+                      {stripOctave(nc.userNote) || '·'}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function SectionTimeline({
   sections,
   totalDurationMs,
@@ -419,7 +544,7 @@ export default function SectionTimeline({
           {showNotes && (
             <div className="space-y-2">
               <NoteStaff notes={noteComparison!} playSnippet={playSnippet} />
-              <div className="overflow-x-auto">
+
               {/* Summary stats */}
               {(() => {
                 const total = noteComparison!.length
@@ -445,78 +570,12 @@ export default function SectionTimeline({
                 )
               })()}
 
-              <table className="w-full text-[11px] border-collapse" dir="ltr">
-                <thead>
-                  <tr className="text-text-muted">
-                    <th className="px-1.5 py-1 text-left font-medium border-b border-border">#</th>
-                    <th className="px-1.5 py-1 text-center font-medium border-b border-border">Reference</th>
-                    <th className="px-1.5 py-1 text-center font-medium border-b border-border">You</th>
-                    <th className="px-1.5 py-1 text-center font-medium border-b border-border">Match</th>
-                    <th className="px-1.5 py-1 text-center font-medium border-b border-border">Timing</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {noteComparison!.map((nc) => {
-                    const { symbol, color } = noteMatchIcon(nc)
-                    const isPlayingRef = playingSnippet?.time === nc.refStartTime && playingSnippet?.type === 'ref'
-                    const isPlayingUser = playingSnippet?.time === (nc.userStartTime ?? -1) && playingSnippet?.type === 'user'
-
-                    return (
-                      <tr
-                        key={nc.noteIndex}
-                        className={nc.userNote ? 'text-foreground' : 'text-text-muted/50'}
-                      >
-                        <td className="px-1.5 py-0.5 border-b border-border/30 tabular-nums">
-                          {nc.noteIndex + 1}
-                        </td>
-                        <td className="px-1.5 py-0.5 text-center border-b border-border/30">
-                          {nc.refNote ? (
-                            <button
-                              onClick={() => playSnippet(nc.refStartTime, nc.refEndTime - nc.refStartTime, 'ref')}
-                              className={`font-mono font-medium px-1 rounded hover:bg-primary/10 transition-colors ${
-                                isPlayingRef ? 'bg-primary/20 text-primary' : ''
-                              }`}
-                              title={`Play ref ${nc.refStartTime.toFixed(1)}s`}
-                            >
-                              {isPlayingRef ? '...' : stripOctave(nc.refNote)}
-                            </button>
-                          ) : (
-                            <span className="text-text-muted/40">-</span>
-                          )}
-                        </td>
-                        <td className="px-1.5 py-0.5 text-center border-b border-border/30">
-                          {nc.userNote && nc.userStartTime != null ? (
-                            <button
-                              onClick={() => playSnippet(nc.userStartTime!, (nc.userEndTime ?? nc.userStartTime! + 0.5) - nc.userStartTime!, 'user')}
-                              className={`font-mono font-medium px-1 rounded hover:bg-primary/10 transition-colors ${
-                                isPlayingUser ? 'bg-primary/20 text-primary' : ''
-                              } ${color}`}
-                              title={`Play yours ${nc.userStartTime.toFixed(1)}s`}
-                            >
-                              {isPlayingUser ? '...' : stripOctave(nc.userNote)}
-                            </button>
-                          ) : (
-                            <span className="text-text-muted/40">-</span>
-                          )}
-                        </td>
-                        <td className={`px-1.5 py-0.5 text-center border-b border-border/30 font-medium ${color}`}>
-                          {symbol}
-                        </td>
-                        <td className="px-1.5 py-0.5 text-center border-b border-border/30 tabular-nums text-[10px]">
-                          {nc.timingOffsetMs != null ? (
-                            <span className={Math.abs(nc.timingOffsetMs) < 500 ? 'text-text-muted' : 'text-status-developing'}>
-                              {nc.timingOffsetMs > 0 ? '+' : ''}{nc.timingOffsetMs}ms
-                            </span>
-                          ) : (
-                            <span className="text-text-muted/40">-</span>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-              </div>
+              {/* Line-by-line comparison */}
+              <NoteLineComparison
+                notes={noteComparison!}
+                playSnippet={playSnippet}
+                playingSnippet={playingSnippet}
+              />
             </div>
           )}
         </>
