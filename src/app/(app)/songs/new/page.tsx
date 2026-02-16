@@ -388,8 +388,25 @@ export default function NewSongPage() {
         const res = await fetch(`/api/lyrics-search?${params}`)
         if (res.ok && !cancelled) {
           const data = await res.json()
-          setLyricsResults(data.results || [])
+          const results: LyricsSearchResult[] = data.results || []
+          setLyricsResults(results)
           setLyricsSearchLinks(data.searchLinks || [])
+
+          // Auto-pick the best result — populate lyrics immediately
+          if (results.length > 0) {
+            const best = results[0]
+            // Populate lyrics textarea + auto-detect chunks
+            setPastedLyrics(best.lyrics)
+            const chunks = autoDetectChunks(best.lyrics)
+            setDetectedChunks(chunks)
+            const detected = detectLanguage(best.lyrics)
+            setLanguage(detected)
+            setActiveTab('paste')
+            // Fill artist if we don't have one
+            if (best.artist && !composer.trim() && !videoAuthor) {
+              setComposer(best.artist)
+            }
+          }
         }
       } catch {
         // Non-critical
@@ -596,8 +613,13 @@ export default function NewSongPage() {
     let chunksToSave: DetectedChunk[] = []
 
     if (activeTab === 'paste') {
-      if (detectedChunks.length === 0) {
+      if (detectedChunks.length === 0 && !youtubeVideoId) {
         setError('נא להזין מילות שיר')
+        return
+      }
+      // If YouTube is present but no lyrics, redirect to YouTube import
+      if (detectedChunks.length === 0 && youtubeVideoId) {
+        await handleYoutubeImport()
         return
       }
       chunksToSave = detectedChunks
@@ -1055,7 +1077,7 @@ export default function NewSongPage() {
                   </Button>
                 </div>
 
-                {/* Lyrics search results */}
+                {/* Lyrics search status */}
                 {lyricsSearching && (
                   <div className="flex items-center gap-3 rounded-lg border border-border/40 bg-surface px-4 py-3">
                     <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -1063,38 +1085,38 @@ export default function NewSongPage() {
                   </div>
                 )}
 
-                {lyricsSearchDone && lyricsResults.length > 0 && !pastedLyrics.trim() && (
+                {/* Lyrics auto-loaded confirmation + switch option */}
+                {lyricsSearchDone && pastedLyrics.trim() && lyricsResults.length > 0 && (
                   <div className="space-y-2">
-                    <p className="text-sm font-medium text-foreground">נמצאו מילים:</p>
-                    {lyricsResults.map((result, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => handlePickLyrics(result)}
-                        className="w-full rounded-lg border border-border bg-surface px-4 py-3 text-right transition-colors hover:border-primary/40 hover:bg-primary/5"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-foreground truncate" dir="auto">
-                              {result.title}
-                              {result.artist && (
-                                <span className="text-text-muted font-normal"> — {result.artist}</span>
-                              )}
-                            </p>
-                            <p className="mt-1 text-xs text-text-muted line-clamp-2 whitespace-pre-line" dir="auto">
-                              {result.lyrics.substring(0, 120)}...
-                            </p>
-                          </div>
-                          <span className="shrink-0 rounded-full bg-border/40 px-2 py-0.5 text-[10px] text-text-muted">
-                            {result.source}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
+                    <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-4 py-2">
+                      <svg className="h-4 w-4 text-success shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span className="text-xs text-foreground">
+                        מילים נטענו מ-{lyricsResults[0].source} — ניתן לערוך למטה
+                      </span>
+                    </div>
+                    {/* Show alternatives if more than one result */}
+                    {lyricsResults.length > 1 && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-text-muted">גרסאות נוספות:</span>
+                        {lyricsResults.slice(1).map((result, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => handlePickLyrics(result)}
+                            className="rounded-lg border border-border bg-surface px-3 py-1 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5"
+                          >
+                            {result.source}{result.artist ? ` — ${result.artist}` : ''}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {lyricsSearchDone && lyricsResults.length === 0 && (
+                {/* No lyrics found — manual search links */}
+                {lyricsSearchDone && lyricsResults.length === 0 && !pastedLyrics.trim() && (
                   <div className="space-y-2">
                     <p className="text-sm text-text-muted">לא נמצאו מילים אוטומטית. נסו לחפש ידנית:</p>
                     <div className="flex flex-wrap gap-2">
@@ -1113,15 +1135,6 @@ export default function NewSongPage() {
                         </a>
                       ))}
                     </div>
-                  </div>
-                )}
-
-                {pastedLyrics.trim() && lyricsSearchDone && (
-                  <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-4 py-2">
-                    <svg className="h-4 w-4 text-success shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    <span className="text-xs text-foreground">מילים נטענו — ניתן לערוך בלשונית &quot;העתק הדבק&quot; למטה</span>
                   </div>
                 )}
               </>
