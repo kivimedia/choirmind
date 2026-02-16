@@ -19,6 +19,12 @@ import type { AudioTrackData, VoicePart } from '@/lib/audio/types'
 // Types
 // ---------------------------------------------------------------------------
 
+interface WordTimestamp {
+  word: string
+  startMs: number
+  endMs: number
+}
+
 interface Chunk {
   id: string
   label: string
@@ -26,6 +32,7 @@ interface Chunk {
   fadeLevel: number
   status: string
   lineTimestamps: number[] | null
+  wordTimestamps: WordTimestamp[][] | null
   audioStartMs?: number | null
   audioEndMs?: number | null
 }
@@ -181,6 +188,7 @@ export default function PracticeSessionPage() {
           return {
             ...c,
             lineTimestamps: c.lineTimestamps ? JSON.parse(c.lineTimestamps) : null,
+            wordTimestamps: c.wordTimestamps ? JSON.parse(c.wordTimestamps) : null,
             fadeLevel: progress?.fadeLevel ?? 0,
             status: progress?.status ?? 'fragile',
           }
@@ -635,6 +643,7 @@ export default function PracticeSessionPage() {
                 lyrics={currentChunk.lyrics}
                 fadeLevel={effectiveFadeLevel}
                 timestamps={currentChunk.lineTimestamps}
+                wordTimestamps={currentChunk.wordTimestamps ?? undefined}
                 currentTimeMs={currentTimeMs}
                 onWordReveal={handleWordReveal}
                 onLineClick={handleLineSeek}

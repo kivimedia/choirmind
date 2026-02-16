@@ -58,22 +58,24 @@ export async function GET(
       }
     }
 
-    // Supplement chunks with lineTimestamps from raw SQL (Prisma engine may not include new fields)
+    // Supplement chunks with lineTimestamps + wordTimestamps from raw SQL (Prisma engine may not include new fields)
     try {
       const chunkIds = song.chunks.map((c) => c.id)
       if (chunkIds.length > 0) {
         const placeholders = chunkIds.map((_, i) => `$${i + 1}`).join(',')
-        const rows = await prisma.$queryRawUnsafe<{ id: string; lineTimestamps: string | null }[]>(
-          `SELECT id, "lineTimestamps" FROM "Chunk" WHERE id IN (${placeholders})`,
+        const rows = await prisma.$queryRawUnsafe<{ id: string; lineTimestamps: string | null; wordTimestamps: string | null }[]>(
+          `SELECT id, "lineTimestamps", "wordTimestamps" FROM "Chunk" WHERE id IN (${placeholders})`,
           ...chunkIds
         )
-        const tsMap = new Map(rows.map((r) => [r.id, r.lineTimestamps]))
+        const tsMap = new Map(rows.map((r) => [r.id, { lineTimestamps: r.lineTimestamps, wordTimestamps: r.wordTimestamps }]))
         for (const chunk of song.chunks as any[]) {
-          chunk.lineTimestamps = tsMap.get(chunk.id) ?? null
+          const ts = tsMap.get(chunk.id)
+          chunk.lineTimestamps = ts?.lineTimestamps ?? null
+          chunk.wordTimestamps = ts?.wordTimestamps ?? null
         }
       }
     } catch {
-      // If raw query fails, lineTimestamps will be missing (non-critical)
+      // If raw query fails, timestamps will be missing (non-critical)
     }
 
     return NextResponse.json({ song })

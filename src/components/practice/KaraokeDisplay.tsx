@@ -15,6 +15,12 @@ import {
 /** Default offset in ms to compensate for human reaction delay when tapping timestamps. */
 const DEFAULT_LATENCY_OFFSET_MS = 500
 
+interface WordTimestamp {
+  word: string
+  startMs: number
+  endMs: number
+}
+
 interface KaraokeDisplayProps {
   /** Full lyrics text — lines separated by newlines. */
   lyrics: string
@@ -22,6 +28,8 @@ interface KaraokeDisplayProps {
   fadeLevel: number
   /** Array of timestamps in ms, one per non-empty line. */
   timestamps: number[]
+  /** Optional word-level timestamps: per non-empty line, array of {word, startMs, endMs}. */
+  wordTimestamps?: WordTimestamp[][]
   /** Current playback time in ms from the YouTube player. */
   currentTimeMs: number
   /** Offset in ms subtracted from timestamps to compensate for tap latency (default 500). */
@@ -79,6 +87,7 @@ export default function KaraokeDisplay({
   lyrics,
   fadeLevel,
   timestamps,
+  wordTimestamps,
   currentTimeMs,
   latencyOffsetMs = DEFAULT_LATENCY_OFFSET_MS,
   onWordReveal,
@@ -126,10 +135,40 @@ export default function KaraokeDisplay({
   // Convert to raw line index for highlighting
   const activeRawLineIdx = activeNonEmptyIdx >= 0 ? nonEmptyLineMap[activeNonEmptyIdx] : -1
 
+  // Adjusted word timestamps (shifted by latency offset like line timestamps)
+  const adjustedWordTimestamps = useMemo(
+    () => wordTimestamps?.map((lineWords) =>
+      lineWords.map((w) => ({
+        ...w,
+        startMs: Math.max(0, w.startMs - latencyOffsetMs),
+        endMs: Math.max(0, w.endMs - latencyOffsetMs),
+      }))
+    ),
+    [wordTimestamps, latencyOffsetMs]
+  )
+
   // Word-by-word progress within the active line
   const wordProgress = useMemo(() => {
     if (activeNonEmptyIdx < 0) return { wordsLit: -1 }
 
+    // If we have real word timestamps for this line, use them
+    const lineWordTs = adjustedWordTimestamps?.[activeNonEmptyIdx]
+    if (lineWordTs && lineWordTs.length > 0) {
+      let wordsLit = 0
+      for (const wt of lineWordTs) {
+        if (currentTimeMs >= wt.endMs) {
+          wordsLit++
+        } else {
+          break
+        }
+      }
+      // Check if the current word is the one being sung
+      const currentWordActive = wordsLit < lineWordTs.length &&
+        currentTimeMs >= lineWordTs[wordsLit].startMs
+      return { wordsLit, currentWordActive }
+    }
+
+    // Fallback: linear interpolation from line timestamps
     const lineStart = adjustedTimestamps[activeNonEmptyIdx]
     const lineEnd = activeNonEmptyIdx + 1 < adjustedTimestamps.length
       ? adjustedTimestamps[activeNonEmptyIdx + 1]
@@ -149,7 +188,7 @@ export default function KaraokeDisplay({
     const wordsLit = Math.floor(progress * wordCount)
 
     return { wordsLit }
-  }, [activeNonEmptyIdx, adjustedTimestamps, currentTimeMs, nonEmptyLineMap, lines])
+  }, [activeNonEmptyIdx, adjustedTimestamps, adjustedWordTimestamps, currentTimeMs, nonEmptyLineMap, lines])
 
   // Auto-scroll active line into view
   useEffect(() => {

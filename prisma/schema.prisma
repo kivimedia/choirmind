@@ -106,6 +106,12 @@ model Choir {
   // Gamification
   leaderboardEnabled         Boolean  @default(true)
 
+  // Weekly rescan
+  rescanUrl                  String?   // Wix/Mila site URL to scan
+  rescanDay                  String?   // "sunday", "monday", etc.
+  rescanHour                 Int?      // 0-23
+  lastRescanAt               DateTime?
+
   // Stripe choir subscription
   stripeSubscriptionId       String?
   stripeCurrentPeriodEnd     DateTime?
@@ -169,6 +175,7 @@ model Chunk {
   lyrics        String  // Full lyrics text (UTF-8 with nikkud)
   textDirection String  @default("rtl")
   lineTimestamps String? // JSON array of ms timestamps per line, e.g. "[0, 5200, 10400]"
+  wordTimestamps String? // JSON array of arrays: per non-empty line, array of {word,startMs,endMs}
   audioStartMs  Int?
   audioEndMs    Int?
   createdAt     DateTime @default(now())

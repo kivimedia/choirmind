@@ -24,9 +24,16 @@ interface ChunkInput {
   order: number
 }
 
+interface WordTimestamp {
+  word: string
+  startMs: number
+  endMs: number
+}
+
 interface AlignmentResult {
   chunkId: string
   timestamps: number[] // ms per line
+  wordTimestamps: WordTimestamp[][] // per non-empty line, array of word timings
   confidence: number   // 0-1
 }
 
@@ -87,6 +94,7 @@ export function alignLyricsToTranscript(
   for (const chunk of sorted) {
     const lines = chunk.lyrics.split('\n').filter((l) => l.trim())
     const timestamps: number[] = []
+    const wordTimestamps: WordTimestamp[][] = []
     let chunkMatches = 0
 
     for (const line of lines) {
@@ -94,6 +102,7 @@ export function alignLyricsToTranscript(
       if (!normalizedLine) {
         // Empty after normalisation — use previous timestamp or 0
         timestamps.push(timestamps.length > 0 ? timestamps[timestamps.length - 1] : 0)
+        wordTimestamps.push([])
         continue
       }
 
@@ -101,6 +110,7 @@ export function alignLyricsToTranscript(
       const ts = matchLineToWords(normalizedLine, words, wordCursor)
       if (ts !== null) {
         timestamps.push(Math.round(ts.startMs))
+        wordTimestamps.push(ts.matchedWords)
         wordCursor = ts.nextCursor
         chunkMatches++
         continue
@@ -110,16 +120,18 @@ export function alignLyricsToTranscript(
       const segTs = matchLineToSegments(normalizedLine, segments, timestamps)
       if (segTs !== null) {
         timestamps.push(Math.round(segTs))
+        wordTimestamps.push([]) // No word-level data from segment fallback
         chunkMatches++
         continue
       }
 
       // Strategy 3: Interpolate from neighbours
       timestamps.push(timestamps.length > 0 ? timestamps[timestamps.length - 1] + 2000 : 0)
+      wordTimestamps.push([])
     }
 
     const confidence = lines.length > 0 ? chunkMatches / lines.length : 0
-    results.push({ chunkId: chunk.id, timestamps, confidence })
+    results.push({ chunkId: chunk.id, timestamps, wordTimestamps, confidence })
   }
 
   return results
@@ -133,7 +145,7 @@ function matchLineToWords(
   normalizedLine: string,
   words: WhisperWord[],
   startIdx: number,
-): { startMs: number; nextCursor: number } | null {
+): { startMs: number; nextCursor: number; matchedWords: WordTimestamp[] } | null {
   if (words.length === 0) return null
 
   const lineWords = normalizedLine.split(/\s+/)
@@ -167,9 +179,18 @@ function matchLineToWords(
   }
 
   if (bestStart >= 0) {
+    const matchedWords: WordTimestamp[] = []
+    for (let k = bestStart; k < bestEnd; k++) {
+      matchedWords.push({
+        word: words[k].word,
+        startMs: Math.round(words[k].start * 1000),
+        endMs: Math.round(words[k].end * 1000),
+      })
+    }
     return {
       startMs: words[bestStart].start * 1000,
       nextCursor: bestEnd,
+      matchedWords,
     }
   }
 

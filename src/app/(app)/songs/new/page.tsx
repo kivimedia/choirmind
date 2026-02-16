@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import Button from '@/components/ui/Button'
@@ -184,6 +184,29 @@ interface ManualChunk {
   lyrics: string
 }
 
+// ── Lyrics search result ────────────────────────────────────────────
+
+interface LyricsSearchResult {
+  source: string
+  title: string
+  artist: string
+  lyrics: string
+}
+
+// ── Clean YouTube title for lyrics search ───────────────────────────
+
+function cleanYoutubeTitle(raw: string): string {
+  return raw
+    // Remove common YouTube suffixes
+    .replace(/\s*[\(\[](official\s*(music\s*)?video|lyric\s*video|audio|visualizer|hd|hq|4k|lyrics)[\)\]]/gi, '')
+    .replace(/\s*[-–|]\s*(official\s*(music\s*)?video|lyric\s*video|audio|visualizer|lyrics)\s*$/gi, '')
+    // Remove "ft./feat." collaborator tags
+    .replace(/\s*(ft\.?|feat\.?)\s+.*/i, '')
+    // Remove trailing whitespace/dashes
+    .replace(/\s*[-–|]\s*$/, '')
+    .trim()
+}
+
 // ── Component ───────────────────────────────────────────────────────
 
 export default function NewSongPage() {
@@ -209,6 +232,50 @@ export default function NewSongPage() {
     setYoutubeVideoId(extracted)
   }
 
+  // YouTube import: download audio + separate stems + create song
+  async function handleYoutubeImport() {
+    if (!youtubeInput.trim() || !title.trim()) {
+      setError('נא להזין שם שיר וקישור YouTube')
+      return
+    }
+    setYtImporting(true)
+    setYtImportStep('מחלץ שמע מ-YouTube...')
+    setError(null)
+
+    try {
+      // Gather lyrics from paste tab if available
+      const lyricsText = pastedLyrics.trim() || undefined
+
+      const res = await fetch('/api/songs/youtube-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          youtubeUrl: youtubeInput.trim(),
+          title: title.trim(),
+          choirId: activeChoirId || undefined,
+          lyrics: lyricsText,
+          language,
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'YouTube import failed' }))
+        throw new Error(data.error || 'YouTube import failed')
+      }
+
+      const data = await res.json()
+      setYtImportStep('הושלם!')
+      setTimeout(() => {
+        router.push(`/songs/${data.song.id}`)
+      }, 500)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'שגיאת ייבוא YouTube')
+    } finally {
+      setYtImporting(false)
+      setYtImportStep(null)
+    }
+  }
+
   // Tab state
   const [activeTab, setActiveTab] = useState('paste')
 
@@ -228,6 +295,16 @@ export default function NewSongPage() {
   const [audioFiles, setAudioFiles] = useState<AudioUploadFile[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const audioInputRef = useRef<HTMLInputElement>(null)
+
+  // YouTube import
+  const [ytImporting, setYtImporting] = useState(false)
+  const [ytImportStep, setYtImportStep] = useState<string | null>(null)
+
+  // Lyrics search (auto-triggered on YouTube paste)
+  const [lyricsSearching, setLyricsSearching] = useState(false)
+  const [lyricsResults, setLyricsResults] = useState<LyricsSearchResult[]>([])
+  const [lyricsSearchLinks, setLyricsSearchLinks] = useState<{ label: string; url: string }[]>([])
+  const [lyricsSearchDone, setLyricsSearchDone] = useState(false)
 
   // Save state
   const [saving, setSaving] = useState(false)
@@ -254,6 +331,91 @@ export default function NewSongPage() {
     },
     [],
   )
+
+  // ── Auto-fetch YouTube title + lyrics on paste ──────────────────
+  useEffect(() => {
+    if (!youtubeVideoId) {
+      setLyricsResults([])
+      setLyricsSearchLinks([])
+      setLyricsSearchDone(false)
+      return
+    }
+
+    let cancelled = false
+
+    async function fetchTitleAndLyrics() {
+      // Step 1: Get video title via oEmbed (no API key needed)
+      let videoTitle = ''
+      let videoAuthor = ''
+      try {
+        const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${youtubeVideoId}&format=json`
+        const res = await fetch(oembedUrl)
+        if (res.ok) {
+          const data = await res.json()
+          videoTitle = data.title || ''
+          videoAuthor = data.author_name || ''
+        }
+      } catch {
+        // Non-critical — user can type title manually
+      }
+
+      if (cancelled) return
+
+      // Auto-fill title if empty
+      if (videoTitle && !title.trim()) {
+        const cleaned = cleanYoutubeTitle(videoTitle)
+        setTitle(cleaned)
+      }
+
+      // Auto-fill composer from channel name if empty
+      if (videoAuthor && !composer.trim()) {
+        setComposer(videoAuthor)
+      }
+
+      // Step 2: Search for lyrics using the (cleaned) title
+      const searchTitle = title.trim() || cleanYoutubeTitle(videoTitle)
+      if (!searchTitle) return
+
+      setLyricsSearching(true)
+      setLyricsSearchDone(false)
+      setLyricsResults([])
+
+      try {
+        const params = new URLSearchParams({ q: searchTitle, lang: language })
+        if (composer.trim() || videoAuthor) {
+          params.set('composer', composer.trim() || videoAuthor)
+        }
+        const res = await fetch(`/api/lyrics-search?${params}`)
+        if (res.ok && !cancelled) {
+          const data = await res.json()
+          setLyricsResults(data.results || [])
+          setLyricsSearchLinks(data.searchLinks || [])
+        }
+      } catch {
+        // Non-critical
+      } finally {
+        if (!cancelled) {
+          setLyricsSearching(false)
+          setLyricsSearchDone(true)
+        }
+      }
+    }
+
+    fetchTitleAndLyrics()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [youtubeVideoId])
+
+  // Pick a lyrics result → populate the paste tab
+  function handlePickLyrics(result: LyricsSearchResult) {
+    handleLyricsChange(result.lyrics)
+    // Also fill composer from the result if we don't have one
+    if (result.artist && !composer.trim()) {
+      setComposer(result.artist)
+    }
+    // Switch to paste tab to show the lyrics
+    setActiveTab('paste')
+  }
 
   // Manual chunk management
   function addManualChunk() {
@@ -864,16 +1026,105 @@ export default function NewSongPage() {
               </button>
             </div>
             {youtubeVideoId && (
-              <div className="relative w-full overflow-hidden rounded-xl" style={{ paddingBottom: '56.25%' }}>
-                <iframe
-                  src={`https://www.youtube-nocookie.com/embed/${youtubeVideoId}`}
-                  frameBorder="0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                  loading="lazy"
-                  className="absolute inset-0 h-full w-full rounded-xl"
-                />
-              </div>
+              <>
+                <div className="relative w-full overflow-hidden rounded-xl" style={{ paddingBottom: '56.25%' }}>
+                  <iframe
+                    src={`https://www.youtube-nocookie.com/embed/${youtubeVideoId}`}
+                    frameBorder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    loading="lazy"
+                    className="absolute inset-0 h-full w-full rounded-xl"
+                  />
+                </div>
+                <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-foreground">ייבוא אודיו מ-YouTube</p>
+                    <p className="text-xs text-text-muted">
+                      {ytImportStep || 'הורדת אודיו, הפרדת קולות/ליווי, סנכרון מילים אוטומטי'}
+                    </p>
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    loading={ytImporting}
+                    disabled={!title.trim()}
+                    onClick={handleYoutubeImport}
+                  >
+                    ייבא אודיו
+                  </Button>
+                </div>
+
+                {/* Lyrics search results */}
+                {lyricsSearching && (
+                  <div className="flex items-center gap-3 rounded-lg border border-border/40 bg-surface px-4 py-3">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    <span className="text-sm text-text-muted">מחפש מילים לשיר...</span>
+                  </div>
+                )}
+
+                {lyricsSearchDone && lyricsResults.length > 0 && !pastedLyrics.trim() && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-foreground">נמצאו מילים:</p>
+                    {lyricsResults.map((result, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handlePickLyrics(result)}
+                        className="w-full rounded-lg border border-border bg-surface px-4 py-3 text-right transition-colors hover:border-primary/40 hover:bg-primary/5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground truncate" dir="auto">
+                              {result.title}
+                              {result.artist && (
+                                <span className="text-text-muted font-normal"> — {result.artist}</span>
+                              )}
+                            </p>
+                            <p className="mt-1 text-xs text-text-muted line-clamp-2 whitespace-pre-line" dir="auto">
+                              {result.lyrics.substring(0, 120)}...
+                            </p>
+                          </div>
+                          <span className="shrink-0 rounded-full bg-border/40 px-2 py-0.5 text-[10px] text-text-muted">
+                            {result.source}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {lyricsSearchDone && lyricsResults.length === 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-text-muted">לא נמצאו מילים אוטומטית. נסו לחפש ידנית:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {lyricsSearchLinks.map((link, idx) => (
+                        <a
+                          key={idx}
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-surface-hover"
+                        >
+                          {link.label}
+                          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {pastedLyrics.trim() && lyricsSearchDone && (
+                  <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-4 py-2">
+                    <svg className="h-4 w-4 text-success shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span className="text-xs text-foreground">מילים נטענו — ניתן לערוך בלשונית &quot;העתק הדבק&quot; למטה</span>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

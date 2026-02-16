@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Card from '@/components/ui/Card'
@@ -49,7 +49,74 @@ export default function ScanPage() {
   const [demucsStatus, setDemucsStatus] = useState<string | null>(null)
   const [rescanning, setRescanning] = useState(false)
 
+  // Rescan schedule state
+  const [rescanUrl, setRescanUrl] = useState('')
+  const [rescanDay, setRescanDay] = useState('sunday')
+  const [rescanHour, setRescanHour] = useState(9)
+  const [lastRescanAt, setLastRescanAt] = useState<string | null>(null)
+  const [rescanSaving, setRescanSaving] = useState(false)
+  const [rescanSaved, setRescanSaved] = useState(false)
+  const [rescanTriggering, setRescanTriggering] = useState(false)
+  const [rescanResult, setRescanResult] = useState<string | null>(null)
+
   const isDirector = session?.user?.role === 'director' || session?.user?.role === 'admin'
+
+  // Fetch rescan config
+  const fetchRescanConfig = useCallback(async () => {
+    if (!activeChoirId) return
+    try {
+      const res = await fetch(`/api/choir/${activeChoirId}/rescan-config`)
+      if (res.ok) {
+        const data = await res.json()
+        const config = data.config
+        if (config.rescanUrl) setRescanUrl(config.rescanUrl)
+        if (config.rescanDay) setRescanDay(config.rescanDay)
+        if (config.rescanHour !== null) setRescanHour(config.rescanHour)
+        if (config.lastRescanAt) setLastRescanAt(new Date(config.lastRescanAt).toLocaleString('he-IL'))
+      }
+    } catch { /* non-critical */ }
+  }, [activeChoirId])
+
+  useEffect(() => { fetchRescanConfig() }, [fetchRescanConfig])
+
+  async function handleSaveRescanConfig() {
+    if (!activeChoirId) return
+    setRescanSaving(true)
+    setRescanSaved(false)
+    try {
+      const res = await fetch(`/api/choir/${activeChoirId}/rescan-config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rescanUrl: rescanUrl.trim() || null, rescanDay, rescanHour }),
+      })
+      if (res.ok) setRescanSaved(true)
+    } catch { /* non-critical */ }
+    setRescanSaving(false)
+  }
+
+  async function handleTriggerRescan() {
+    if (!activeChoirId) return
+    setRescanTriggering(true)
+    setRescanResult(null)
+    try {
+      const res = await fetch('/api/scan/rescan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ choirId: activeChoirId }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setRescanResult(`נסרקו ${data.scanned} שירים, יובאו ${data.imported} חדשים`)
+        setLastRescanAt(new Date().toLocaleString('he-IL'))
+      } else {
+        const data = await res.json()
+        setRescanResult(data.error || 'שגיאה')
+      }
+    } catch {
+      setRescanResult('שגיאת רשת')
+    }
+    setRescanTriggering(false)
+  }
 
   // Helper: normalise a title for dedup comparison (lowercase + trim)
   function normalizeTitle(t: string) {
@@ -333,6 +400,90 @@ export default function ScanPage() {
           {demucsStatus}
         </div>
       )}
+
+      {/* Weekly rescan schedule */}
+      <Card className="!p-5 space-y-4">
+        <div>
+          <h3 className="text-base font-semibold text-foreground">סריקה אוטומטית שבועית</h3>
+          <p className="text-xs text-text-muted mt-0.5">הגדירו סריקה שבועית לייבוא אוטומטי של שירים חדשים מאתר המקהלה</p>
+        </div>
+
+        <div className="space-y-3">
+          <Input
+            label="כתובת אתר לסריקה"
+            placeholder="https://www.example.com/repertoire"
+            value={rescanUrl}
+            onChange={(e) => setRescanUrl(e.target.value)}
+            dir="ltr"
+          />
+
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-foreground mb-1">יום בשבוע</label>
+              <select
+                value={rescanDay}
+                onChange={(e) => setRescanDay(e.target.value)}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground"
+              >
+                <option value="sunday">יום ראשון</option>
+                <option value="monday">יום שני</option>
+                <option value="tuesday">יום שלישי</option>
+                <option value="wednesday">יום רביעי</option>
+                <option value="thursday">יום חמישי</option>
+                <option value="friday">יום שישי</option>
+                <option value="saturday">שבת</option>
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-foreground mb-1">שעה (UTC)</label>
+              <select
+                value={rescanHour}
+                onChange={(e) => setRescanHour(parseInt(e.target.value))}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground"
+              >
+                {Array.from({ length: 24 }, (_, i) => (
+                  <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between pt-1">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="primary"
+              size="sm"
+              loading={rescanSaving}
+              onClick={handleSaveRescanConfig}
+            >
+              שמור תזמון
+            </Button>
+            {rescanSaved && <span className="text-xs text-success">נשמר!</span>}
+          </div>
+
+          <div className="flex items-center gap-3">
+            {lastRescanAt && (
+              <span className="text-xs text-text-muted">סריקה אחרונה: {lastRescanAt}</span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              loading={rescanTriggering}
+              onClick={handleTriggerRescan}
+              disabled={!rescanUrl.trim()}
+            >
+              סרוק עכשיו
+            </Button>
+          </div>
+        </div>
+
+        {rescanResult && (
+          <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-2 text-sm text-foreground">
+            {rescanResult}
+          </div>
+        )}
+      </Card>
 
       {/* URL input */}
       <Card className="!p-5">

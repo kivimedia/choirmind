@@ -55,6 +55,7 @@ image = (
         "psycopg2-binary",
         "pydantic",
         "demucs",
+        "yt-dlp",
     )
     .env({"TORCHAUDIO_BACKEND": "soundfile", "TORCH_HOME": "/root/.cache/torch"})
     # Pre-download all 4 Demucs htdemucs_ft checkpoint files into the image.
@@ -105,6 +106,14 @@ class PrepareReferenceRequest(BaseModel):
     voicePart: str
     sourceTrackId: str
     audioFileUrl: str
+
+
+class YouTubeExtractRequest(BaseModel):
+    youtube_url: str
+
+
+class SeparateStemsRequest(BaseModel):
+    s3_key: str
 
 
 # ---------------------------------------------------------------------------
@@ -1225,6 +1234,171 @@ async def prepare_reference(req: PrepareReferenceRequest):
             logger.error("Failed to update reference status: %s", inner_exc)
 
         raise HTTPException(status_code=500, detail=error_msg[:500])
+
+
+# ---------------------------------------------------------------------------
+# YouTube extraction endpoint
+# ---------------------------------------------------------------------------
+
+
+@web_app.post("/api/v1/youtube-extract")
+async def youtube_extract(req: YouTubeExtractRequest):
+    """Download audio from YouTube URL and upload to S3.
+
+    Uses yt-dlp to download best audio, converts to WAV,
+    uploads to S3, returns the S3 key and duration.
+    """
+    import subprocess
+
+    logger.info("youtube-extract: url=%s", req.youtube_url)
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_template = os.path.join(tmpdir, "audio.%(ext)s")
+
+            # Download best audio with yt-dlp
+            result = subprocess.run(
+                [
+                    "yt-dlp",
+                    "--no-playlist",
+                    "-x",
+                    "--audio-format", "wav",
+                    "--audio-quality", "0",
+                    "-o", output_template,
+                    req.youtube_url,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+            if result.returncode != 0:
+                logger.error("yt-dlp failed: %s", result.stderr)
+                raise HTTPException(status_code=422, detail=f"yt-dlp failed: {result.stderr[:200]}")
+
+            # Find the output file
+            wav_path = os.path.join(tmpdir, "audio.wav")
+            if not os.path.exists(wav_path):
+                # yt-dlp may have created a different extension
+                for f in os.listdir(tmpdir):
+                    if f.startswith("audio."):
+                        # Convert to wav if needed
+                        src = os.path.join(tmpdir, f)
+                        if not f.endswith(".wav"):
+                            subprocess.run(
+                                ["ffmpeg", "-y", "-i", src, "-ar", "44100", "-ac", "2", wav_path],
+                                check=True, capture_output=True, timeout=60,
+                            )
+                        else:
+                            wav_path = src
+                        break
+
+            if not os.path.exists(wav_path):
+                raise HTTPException(status_code=500, detail="Failed to extract audio")
+
+            # Get duration
+            import soundfile as sf
+            info = sf.info(wav_path)
+            duration_ms = int(info.duration * 1000)
+
+            # Upload to S3
+            s3_key = f"youtube-imports/{uuid.uuid4()}.wav"
+            audio_url = _upload_to_s3(wav_path, s3_key, content_type="audio/wav")
+
+            logger.info("youtube-extract: uploaded %s (%dms)", s3_key, duration_ms)
+
+            return {
+                "audio_s3_key": s3_key,
+                "audio_url": audio_url,
+                "duration_ms": duration_ms,
+            }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        error_msg = f"{type(exc).__name__}: {exc}"
+        logger.error("youtube-extract failed: %s", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg[:300])
+
+
+# ---------------------------------------------------------------------------
+# Stem separation endpoint
+# ---------------------------------------------------------------------------
+
+
+@web_app.post("/api/v1/separate-stems")
+async def separate_stems(req: SeparateStemsRequest):
+    """Separate audio into vocals and accompaniment using Demucs.
+
+    Downloads from S3, runs Demucs, uploads results back to S3.
+    """
+    logger.info("separate-stems: s3_key=%s", req.s3_key)
+
+    try:
+        # Download audio from S3
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            src_path = tmp.name
+        _download_from_s3(req.s3_key, src_path)
+
+        with open(src_path, "rb") as f:
+            audio_bytes = f.read()
+        os.unlink(src_path)
+
+        # Run Demucs vocal isolation (GPU)
+        demucs_result = run_demucs_isolation.remote(audio_bytes, "separate.wav")
+        vocal_bytes = demucs_result["vocals"]
+        accompaniment_bytes = demucs_result.get("accompaniment")
+
+        base_key = req.s3_key.rsplit(".", 1)[0]
+
+        # Upload vocals
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp.write(vocal_bytes)
+            tmp_vocal_path = tmp.name
+        try:
+            vocals_key = f"{base_key}_vocals.wav"
+            vocals_url = _upload_to_s3(tmp_vocal_path, vocals_key, content_type="audio/wav")
+        finally:
+            os.unlink(tmp_vocal_path)
+
+        # Upload accompaniment
+        accompaniment_url = None
+        accompaniment_key = None
+        if accompaniment_bytes:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp.write(accompaniment_bytes)
+                tmp_acc_path = tmp.name
+            try:
+                accompaniment_key = f"{base_key}_accompaniment.wav"
+                accompaniment_url = _upload_to_s3(tmp_acc_path, accompaniment_key, content_type="audio/wav")
+            finally:
+                os.unlink(tmp_acc_path)
+
+        # Get duration
+        import soundfile as sf
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp.write(vocal_bytes)
+            tmp_dur_path = tmp.name
+        try:
+            info = sf.info(tmp_dur_path)
+            duration_ms = int(info.duration * 1000)
+        finally:
+            os.unlink(tmp_dur_path)
+
+        logger.info("separate-stems: done, vocals=%s, accompaniment=%s", vocals_key, accompaniment_key)
+
+        return {
+            "vocals_s3_key": vocals_key,
+            "vocals_url": vocals_url,
+            "accompaniment_s3_key": accompaniment_key,
+            "accompaniment_url": accompaniment_url,
+            "duration_ms": duration_ms,
+        }
+
+    except Exception as exc:
+        error_msg = f"{type(exc).__name__}: {exc}"
+        logger.error("separate-stems failed: %s", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg[:300])
 
 
 # ---------------------------------------------------------------------------

@@ -133,9 +133,13 @@ export async function POST(
     // Save timestamps for each chunk
     for (const result of alignResults) {
       const timestampsJson = JSON.stringify(result.timestamps)
+      const wordTimestampsJson = result.wordTimestamps.length > 0
+        ? JSON.stringify(result.wordTimestamps)
+        : null
       await prisma.$executeRawUnsafe(
-        'UPDATE "Chunk" SET "lineTimestamps" = $1 WHERE id = $2',
+        'UPDATE "Chunk" SET "lineTimestamps" = $1, "wordTimestamps" = $2 WHERE id = $3',
         timestampsJson,
+        wordTimestampsJson,
         result.chunkId,
       )
     }
