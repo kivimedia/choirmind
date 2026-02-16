@@ -798,7 +798,7 @@ export default function NewSongPage() {
         rows={10}
         value={pastedLyrics}
         onChange={(e) => handleLyricsChange(e.target.value)}
-        dir="auto"
+        dir="rtl"
       />
 
       {/* Detected chunks preview */}
