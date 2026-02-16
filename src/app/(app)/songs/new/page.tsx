@@ -376,12 +376,16 @@ export default function NewSongPage() {
       const searchTitle = title.trim() || cleanYoutubeTitle(videoTitle)
       if (!searchTitle) return
 
+      // Detect language from the title so we search the right sites
+      const titleLang = detectLanguage(searchTitle)
+      setLanguage(titleLang)
+
       setLyricsSearching(true)
       setLyricsSearchDone(false)
       setLyricsResults([])
 
       try {
-        const params = new URLSearchParams({ q: searchTitle, lang: language })
+        const params = new URLSearchParams({ q: searchTitle, lang: titleLang })
         if (composer.trim() || videoAuthor) {
           params.set('composer', composer.trim() || videoAuthor)
         }
