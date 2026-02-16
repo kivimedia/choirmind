@@ -20,7 +20,6 @@ export default function SignInPage() {
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [googleLoading, setGoogleLoading] = useState(false)
 
   async function handleContinue() {
     if (!email.trim()) return
@@ -135,17 +134,6 @@ export default function SignInPage() {
       setError(tCommon('error'))
     } finally {
       setLoading(false)
-    }
-  }
-
-  async function handleGoogleSignIn() {
-    setGoogleLoading(true)
-    setError(null)
-    try {
-      await signIn('google', { callbackUrl: '/' })
-    } catch {
-      setError(tCommon('error'))
-      setGoogleLoading(false)
     }
   }
 
@@ -342,28 +330,7 @@ export default function SignInPage() {
               </div>
             )}
 
-            {/* Google sign in */}
-            {step !== 'magic-link-sent' && (
-              <div className="space-y-3">
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-border" />
-                  </div>
-                  <div className="relative flex justify-center text-xs">
-                    <span className="bg-card px-2 text-text-muted">או</span>
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="lg"
-                  className="w-full"
-                  loading={googleLoading}
-                  onClick={handleGoogleSignIn}
-                >
-                  {t('googleSignIn')}
-                </Button>
-              </div>
-            )}
+            {/* Google sign in — hidden until OAuth credentials are configured */}
           </div>
         </Card>
       </div>
