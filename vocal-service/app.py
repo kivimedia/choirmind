@@ -37,7 +37,7 @@ logger = logging.getLogger("vocal-service")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("ffmpeg", "libsndfile1")
+    .apt_install("ffmpeg", "libsndfile1", "nodejs")
     .pip_install(
         "fastapi",
         "uvicorn",

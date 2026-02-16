@@ -614,16 +614,18 @@ export default function NewSongPage() {
       return
     }
 
+    // If YouTube video is present, always use the YouTube import flow
+    // (extracts audio, separates stems, auto-syncs — all in one)
+    if (youtubeVideoId) {
+      await handleYoutubeImport()
+      return
+    }
+
     let chunksToSave: DetectedChunk[] = []
 
     if (activeTab === 'paste') {
-      if (detectedChunks.length === 0 && !youtubeVideoId) {
+      if (detectedChunks.length === 0) {
         setError('נא להזין מילות שיר')
-        return
-      }
-      // If YouTube is present but no lyrics, redirect to YouTube import
-      if (detectedChunks.length === 0 && youtubeVideoId) {
-        await handleYoutubeImport()
         return
       }
       chunksToSave = detectedChunks
@@ -1064,21 +1066,17 @@ export default function NewSongPage() {
                   />
                 </div>
                 <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+                  <svg className="h-5 w-5 text-primary shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                  </svg>
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-foreground">ייבוא אודיו מ-YouTube</p>
-                    <p className="text-xs text-text-muted">
-                      {ytImportStep || 'הורדת אודיו, הפרדת קולות/ליווי, סנכרון מילים אוטומטי'}
+                    <p className="text-sm font-medium text-foreground">
+                      {ytImportStep || 'בשמירה: הורדת אודיו + הפרדת קולות + סנכרון אוטומטי'}
                     </p>
                   </div>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    loading={ytImporting}
-                    disabled={!title.trim()}
-                    onClick={handleYoutubeImport}
-                  >
-                    ייבא אודיו
-                  </Button>
+                  {ytImporting && (
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  )}
                 </div>
 
                 {/* Lyrics search status */}
