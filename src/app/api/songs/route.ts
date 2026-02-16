@@ -35,24 +35,51 @@ export async function GET(request: NextRequest) {
     // Optional choir filter
     const filterChoirId = request.nextUrl.searchParams.get('choirId')
 
-    // Fetch cached songs + live favorites in parallel
+    // Fetch cached songs + live favorites + readiness in parallel
     t = Date.now()
-    const [cachedSongs, allFavorites] = await Promise.all([
+    const [cachedSongs, allFavorites, chunkProgress] = await Promise.all([
       getCachedSongs(choirIds, filterChoirId, userId, showArchived),
       prisma.userFavoriteSong.findMany({
         where: { userId },
         select: { songId: true },
       }).catch(() => [] as { songId: string }[]),
+      prisma.userChunkProgress.findMany({
+        where: { userId },
+        select: {
+          chunk: { select: { songId: true } },
+          status: true,
+        },
+      }).catch(() => [] as { chunk: { songId: string }; status: string }[]),
     ])
     timings.songsAndFavorites = Date.now() - t
 
     const favSet = new Set(allFavorites.map((f) => f.songId))
 
-    // Merge live favorites into cached song data
-    const songsResponse = cachedSongs.map((song) => ({
-      ...song,
-      isFavorited: favSet.has(song.id),
-    }))
+    // Build readiness map: % of chunks that are solid/locked_in per song
+    const songChunkCounts = new Map<string, { solid: number; total: number }>()
+    for (const cp of chunkProgress) {
+      const songId = cp.chunk.songId
+      const entry = songChunkCounts.get(songId) ?? { solid: 0, total: 0 }
+      entry.total++
+      if (cp.status === 'solid' || cp.status === 'locked_in') {
+        entry.solid++
+      }
+      songChunkCounts.set(songId, entry)
+    }
+
+    // Merge live favorites + readiness into cached song data
+    const songsResponse = cachedSongs.map((song) => {
+      const progress = songChunkCounts.get(song.id)
+      const totalChunks = song.chunkCount
+      const readiness = totalChunks > 0 && progress
+        ? Math.round((progress.solid / totalChunks) * 100)
+        : 0
+      return {
+        ...song,
+        isFavorited: favSet.has(song.id),
+        readiness,
+      }
+    })
 
     timings.total = Date.now() - t0
     if (perfDebug) {
