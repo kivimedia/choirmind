@@ -2,8 +2,10 @@ import { NextAuthOptions } from 'next-auth'
 import { PrismaAdapter } from '@auth/prisma-adapter'
 import GoogleProvider from 'next-auth/providers/google'
 import EmailProvider from 'next-auth/providers/email'
+import CredentialsProvider from 'next-auth/providers/credentials'
 import { prisma } from './db'
 import { sendEmail } from './email'
+import { verifyPassword } from './password'
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma) as NextAuthOptions['adapter'],
@@ -72,6 +74,26 @@ export const authOptions: NextAuthOptions = {
           }),
         ]
       : []),
+    // Email + password
+    CredentialsProvider({
+      id: 'credentials',
+      name: 'Password',
+      credentials: {
+        email: { label: 'Email', type: 'email' },
+        password: { label: 'Password', type: 'password' },
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) return null
+        const user = await prisma.user.findUnique({
+          where: { email: credentials.email.toLowerCase().trim() },
+          select: { id: true, name: true, email: true, image: true, hashedPassword: true },
+        })
+        if (!user?.hashedPassword) return null
+        const valid = await verifyPassword(credentials.password, user.hashedPassword)
+        if (!valid) return null
+        return { id: user.id, name: user.name, email: user.email, image: user.image }
+      },
+    }),
   ],
   session: {
     strategy: 'jwt',

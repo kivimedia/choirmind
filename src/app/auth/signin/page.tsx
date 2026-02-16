@@ -7,35 +7,134 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Card from '@/components/ui/Card'
 
+type Step = 'email' | 'login' | 'register' | 'passwordless' | 'magic-link-sent'
+
 export default function SignInPage() {
   const t = useTranslations('auth')
   const tCommon = useTranslations('common')
 
-  const [magicEmail, setMagicEmail] = useState('')
-  const [magicLinkSent, setMagicLinkSent] = useState(false)
-  const [magicLoading, setMagicLoading] = useState(false)
+  const [step, setStep] = useState<Step>('email')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
 
+  async function handleContinue() {
+    if (!email.trim()) return
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/auth/check-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(tCommon('error'))
+        return
+      }
+      if (data.exists) {
+        if (data.hasPassword) {
+          setStep('login')
+        } else {
+          setStep('passwordless')
+        }
+      } else {
+        setStep('register')
+      }
+    } catch {
+      setError(tCommon('error'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handlePasswordLogin() {
+    if (!password) return
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await signIn('credentials', {
+        email: email.trim(),
+        password,
+        redirect: false,
+        callbackUrl: '/',
+      })
+      if (result?.error) {
+        setError(t('invalidCredentials'))
+      } else if (result?.url) {
+        window.location.href = result.url
+      }
+    } catch {
+      setError(tCommon('error'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleRegister() {
+    if (!password) return
+    if (password !== confirmPassword) {
+      setError(t('passwordMismatch'))
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password, name: name.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        // Map known error keys to translations
+        const errorKey = data.error as string
+        const translated = (() => {
+          try { return t(errorKey) } catch { return null }
+        })()
+        setError(translated || t('registrationFailed'))
+        return
+      }
+      // Auto sign-in after registration
+      const result = await signIn('credentials', {
+        email: email.trim(),
+        password,
+        redirect: false,
+        callbackUrl: '/',
+      })
+      if (result?.url) {
+        window.location.href = result.url
+      }
+    } catch {
+      setError(tCommon('error'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function handleMagicLink() {
-    if (!magicEmail.trim()) return
-    setMagicLoading(true)
+    setLoading(true)
     setError(null)
     try {
       const result = await signIn('email', {
-        email: magicEmail,
+        email: email.trim(),
         redirect: false,
         callbackUrl: '/',
       })
       if (result?.error) {
         setError(result.error)
       } else {
-        setMagicLinkSent(true)
+        setStep('magic-link-sent')
       }
     } catch {
       setError(tCommon('error'))
     } finally {
-      setMagicLoading(false)
+      setLoading(false)
     }
   }
 
@@ -48,6 +147,14 @@ export default function SignInPage() {
       setError(tCommon('error'))
       setGoogleLoading(false)
     }
+  }
+
+  function goBack() {
+    setStep('email')
+    setPassword('')
+    setConfirmPassword('')
+    setName('')
+    setError(null)
   }
 
   return (
@@ -68,7 +175,7 @@ export default function SignInPage() {
         <Card className="!p-6">
           <div className="space-y-5">
             <h2 className="text-center text-xl font-semibold text-foreground">
-              {t('signIn')}
+              {step === 'register' ? t('signUp') : t('signIn')}
             </h2>
 
             {/* Error */}
@@ -79,39 +186,184 @@ export default function SignInPage() {
             )}
 
             {/* Magic link sent success */}
-            {magicLinkSent && (
+            {step === 'magic-link-sent' && (
               <div className="rounded-lg border border-secondary/30 bg-secondary/5 px-4 py-3 text-sm text-secondary">
                 {t('magicLinkSent')}
               </div>
             )}
 
-            {/* Email magic link */}
-            {!magicLinkSent && (
+            {/* Step 1: Email */}
+            {step === 'email' && (
               <div className="space-y-3">
                 <Input
                   label={t('email')}
                   type="email"
                   placeholder="you@example.com"
-                  value={magicEmail}
-                  onChange={(e) => setMagicEmail(e.target.value)}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   dir="ltr"
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleMagicLink()
+                    if (e.key === 'Enter') handleContinue()
                   }}
                 />
                 <Button
                   variant="primary"
                   size="lg"
                   className="w-full"
-                  loading={magicLoading}
-                  onClick={handleMagicLink}
+                  loading={loading}
+                  onClick={handleContinue}
                 >
-                  {t('magicLink')}
+                  {t('continue')}
                 </Button>
               </div>
             )}
 
-            {/* Google sign in — hidden until OAuth credentials are configured */}
+            {/* Step 2a: Login (has password) */}
+            {step === 'login' && (
+              <div className="space-y-3">
+                <div className="rounded-lg bg-surface-elevated px-3 py-2 text-sm text-text-muted" dir="ltr">
+                  {email}
+                </div>
+                <Input
+                  label={t('password')}
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  dir="ltr"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handlePasswordLogin()
+                  }}
+                />
+                <Button
+                  variant="primary"
+                  size="lg"
+                  className="w-full"
+                  loading={loading}
+                  onClick={handlePasswordLogin}
+                >
+                  {t('signInWithPassword')}
+                </Button>
+                <button
+                  type="button"
+                  onClick={handleMagicLink}
+                  className="w-full text-center text-sm text-primary hover:underline"
+                >
+                  {t('useMagicLinkInstead')}
+                </button>
+                <button
+                  type="button"
+                  onClick={goBack}
+                  className="w-full text-center text-sm text-text-muted hover:underline"
+                >
+                  {tCommon('back')}
+                </button>
+              </div>
+            )}
+
+            {/* Step 2b: Register (new user) */}
+            {step === 'register' && (
+              <div className="space-y-3">
+                <div className="rounded-lg bg-surface-elevated px-3 py-2 text-sm text-text-muted" dir="ltr">
+                  {email}
+                </div>
+                <Input
+                  label={t('name')}
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+                <Input
+                  label={t('password')}
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  dir="ltr"
+                />
+                <Input
+                  label={t('confirmPassword')}
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  dir="ltr"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleRegister()
+                  }}
+                />
+                <Button
+                  variant="primary"
+                  size="lg"
+                  className="w-full"
+                  loading={loading}
+                  onClick={handleRegister}
+                >
+                  {t('createAccount')}
+                </Button>
+                <button
+                  type="button"
+                  onClick={handleMagicLink}
+                  className="w-full text-center text-sm text-primary hover:underline"
+                >
+                  {t('useMagicLinkInstead')}
+                </button>
+                <button
+                  type="button"
+                  onClick={goBack}
+                  className="w-full text-center text-sm text-text-muted hover:underline"
+                >
+                  {tCommon('back')}
+                </button>
+              </div>
+            )}
+
+            {/* Step 2c: Passwordless user (magic-link/OAuth, no password yet) */}
+            {step === 'passwordless' && (
+              <div className="space-y-3">
+                <div className="rounded-lg bg-surface-elevated px-3 py-2 text-sm text-text-muted" dir="ltr">
+                  {email}
+                </div>
+                <p className="text-sm text-text-muted">{t('noPasswordYet')}</p>
+                <Button
+                  variant="primary"
+                  size="lg"
+                  className="w-full"
+                  loading={loading}
+                  onClick={handleMagicLink}
+                >
+                  {t('sendMagicLink')}
+                </Button>
+                <button
+                  type="button"
+                  onClick={goBack}
+                  className="w-full text-center text-sm text-text-muted hover:underline"
+                >
+                  {tCommon('back')}
+                </button>
+              </div>
+            )}
+
+            {/* Google sign in */}
+            {step !== 'magic-link-sent' && (
+              <div className="space-y-3">
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-border" />
+                  </div>
+                  <div className="relative flex justify-center text-xs">
+                    <span className="bg-card px-2 text-text-muted">או</span>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="w-full"
+                  loading={googleLoading}
+                  onClick={handleGoogleSignIn}
+                >
+                  {t('googleSignIn')}
+                </Button>
+              </div>
+            )}
           </div>
         </Card>
       </div>

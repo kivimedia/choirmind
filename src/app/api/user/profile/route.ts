@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
         role: true,
         shabbatMode: true,
         scoringLevel: true,
+        hashedPassword: true,
         xp: true,
         currentStreak: true,
         longestStreak: true,
@@ -54,7 +55,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ user })
+    // Never send the hash — map to boolean
+    const { hashedPassword, ...rest } = user
+    return NextResponse.json({ user: { ...rest, hasPassword: !!hashedPassword } })
   } catch (error) {
     console.error('GET /api/user/profile error:', error)
     return NextResponse.json(

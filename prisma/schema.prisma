@@ -42,6 +42,8 @@ model User {
   vocalPracticeSessions   VocalPracticeSession[]
   vocalQuota              UserVocalQuota?
 
+  hashedPassword          String?
+
   // Stripe
   stripeCustomerId        String?   @unique
 }
