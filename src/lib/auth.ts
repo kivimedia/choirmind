@@ -16,10 +16,16 @@ export const authOptions: NextAuthOptions = {
         console.log(`[AUTH] sendVerificationRequest called for: ${email}`)
         console.log(`[AUTH] Magic link URL: ${url}`)
 
-        // Wrap in a click-through page to prevent email security scanners
-        // from consuming the one-time token by pre-fetching the callback URL
+        // Store callback URL server-side so email scanners can't unwrap it
+        // from the email link. Only an opaque ID is sent in the email.
         const baseUrl = process.env.NEXTAUTH_URL || 'https://choirmind.vercel.app'
-        const safeUrl = `${baseUrl}/auth/verify-link?callbackUrl=${encodeURIComponent(url)}`
+        const redirect = await prisma.magicLinkRedirect.create({
+          data: {
+            callbackUrl: url,
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 60 minutes
+          },
+        })
+        const safeUrl = `${baseUrl}/auth/verify-link?id=${redirect.id}`
 
         const result = await sendEmail({
           to: email,

@@ -5,10 +5,13 @@ import { Suspense, useState } from 'react'
 
 function VerifyLinkInner() {
   const searchParams = useSearchParams()
-  const callbackUrl = searchParams.get('callbackUrl')
+  const id = searchParams.get('id')
+  // Legacy support: if callbackUrl is in the URL directly (old emails)
+  const legacyCallbackUrl = searchParams.get('callbackUrl')
   const [clicked, setClicked] = useState(false)
+  const [error, setError] = useState(false)
 
-  if (!callbackUrl) {
+  if (!id && !legacyCallbackUrl) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background p-4">
         <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-8 text-center shadow-lg">
@@ -21,9 +24,41 @@ function VerifyLinkInner() {
     )
   }
 
-  function handleClick() {
+  async function handleClick() {
     setClicked(true)
-    window.location.href = callbackUrl!
+    setError(false)
+
+    try {
+      // Legacy path: callbackUrl directly in the URL (old emails before fix)
+      if (legacyCallbackUrl) {
+        window.location.href = legacyCallbackUrl
+        return
+      }
+
+      // New path: resolve the opaque ID server-side
+      const res = await fetch('/api/auth/resolve-magic-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+
+      if (!res.ok) {
+        setClicked(false)
+        setError(true)
+        return
+      }
+
+      const data = await res.json()
+      if (data.callbackUrl) {
+        window.location.href = data.callbackUrl
+      } else {
+        setClicked(false)
+        setError(true)
+      }
+    } catch {
+      setClicked(false)
+      setError(true)
+    }
   }
 
   return (
@@ -41,6 +76,11 @@ function VerifyLinkInner() {
             </div>
           ) : (
             <>
+              {error && (
+                <p className="mb-4 text-sm text-danger">
+                  הקישור אינו תקין או שפג תוקפו. נסו לבקש קישור חדש.
+                </p>
+              )}
               <p className="mb-4 text-foreground">לחצו על הכפתור כדי להתחבר:</p>
               <button
                 type="button"
