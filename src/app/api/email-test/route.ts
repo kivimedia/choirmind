@@ -1,9 +1,16 @@
 import { NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
 import { sendEmail } from '@/lib/email'
 
-// POST /api/email-test — Send a test email directly via Resend (bypasses NextAuth)
+// POST /api/email-test — Send a test email directly via Resend (admin only)
 export async function POST(request: Request) {
   try {
+    const session = await getServerSession(authOptions)
+    if (!session?.user?.id || session.user.role !== 'admin') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
+
     const { to } = await request.json()
 
     if (!to) {
