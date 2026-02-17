@@ -87,11 +87,41 @@ export default function KaraokeMadnessPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Setup state
-  const [playerCount, setPlayerCount] = useState<2 | 3 | 4>(2)
-  const [playerNames, setPlayerNames] = useState(['', '', '', ''])
-  const [difficulty, setDifficulty] = useState<1 | 2 | 3>(1)
-  const [audioMode, setAudioMode] = useState<'karaoke' | 'full'>('karaoke')
+  // Setup state — restore from localStorage
+  const [playerCount, setPlayerCount] = useState<2 | 3 | 4>(() => {
+    if (typeof window === 'undefined') return 2
+    const saved = localStorage.getItem('km_playerCount')
+    return saved ? (Number(saved) as 2 | 3 | 4) : 2
+  })
+  const [playerNames, setPlayerNames] = useState(() => {
+    if (typeof window === 'undefined') return ['', '', '', '']
+    try {
+      const saved = localStorage.getItem('km_playerNames')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.length === 4) return parsed as string[]
+      }
+    } catch { /* ignore */ }
+    return ['', '', '', '']
+  })
+  const [difficulty, setDifficulty] = useState<1 | 2 | 3>(() => {
+    if (typeof window === 'undefined') return 1
+    const saved = localStorage.getItem('km_difficulty')
+    return saved ? (Number(saved) as 1 | 2 | 3) : 1
+  })
+  const [audioMode, setAudioMode] = useState<'karaoke' | 'full'>(() => {
+    if (typeof window === 'undefined') return 'karaoke'
+    const saved = localStorage.getItem('km_audioMode')
+    return saved === 'full' ? 'full' : 'karaoke'
+  })
+
+  // Persist setup state to localStorage
+  useEffect(() => {
+    localStorage.setItem('km_playerCount', String(playerCount))
+    localStorage.setItem('km_playerNames', JSON.stringify(playerNames))
+    localStorage.setItem('km_difficulty', String(difficulty))
+    localStorage.setItem('km_audioMode', audioMode)
+  }, [playerCount, playerNames, difficulty, audioMode])
 
   // Game state
   const [phase, setPhase] = useState<GamePhase>('setup')
@@ -624,8 +654,6 @@ export default function KaraokeMadnessPage() {
               setPhase('setup')
               setAssignment(null)
               setCurrentTimeMs(0)
-              setPlayerNames(['', '', '', ''])
-              setDifficulty(1)
             }}
           >
             &#9881;&#65039; שנו הגדרות
