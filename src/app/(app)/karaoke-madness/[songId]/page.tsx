@@ -275,6 +275,23 @@ export default function KaraokeMadnessPage() {
     startWithDifficulty(prev)
   }
 
+  // Spacebar toggles play/pause during playing phase
+  useEffect(() => {
+    if (phase !== 'playing') return
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.code === 'Space' && !e.repeat) {
+        e.preventDefault()
+        const actions = audioActionsRef.current
+        if (actions) {
+          if (actions.isPlaying) actions.pause()
+          else actions.play()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [phase])
+
   // Countdown
   useEffect(() => {
     if (phase !== 'countdown') return
