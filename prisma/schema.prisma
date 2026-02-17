@@ -151,6 +151,7 @@ model Song {
   concertOrder  Int?
   tags          String?  // JSON array stored as string
   archivedAt    DateTime? // null = active, set = archived
+  crazyLyrics       String?  // JSON string[][] — AI-generated alternative lyrics for KM
   processingStatus  String?  // PENDING, PROCESSING, READY, FAILED
   processingStage   String?  // downloading, separating, syncing
   processingError   String?  // Error message if FAILED

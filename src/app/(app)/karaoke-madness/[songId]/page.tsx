@@ -48,6 +48,7 @@ interface SongData {
   audioTracks?: AudioTrackData[]
   referenceVocals?: ReferenceVocal[]
   youtubeVideoId?: string | null
+  crazyLyrics?: string | null
 }
 
 type GamePhase = 'setup' | 'countdown' | 'playing' | 'ended'
@@ -188,6 +189,16 @@ export default function KaraokeMadnessPage() {
         }
         setSong(songData)
         document.title = `${songData.title} - קריוקי מטורף`
+
+        // Load saved crazy lyrics from DB
+        if (songData.crazyLyrics) {
+          try {
+            const parsed = JSON.parse(songData.crazyLyrics)
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setCrazyWords(parsed)
+            }
+          } catch { /* ignore invalid JSON */ }
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'שגיאה בטעינת השיר')
       } finally {

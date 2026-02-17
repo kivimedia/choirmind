@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db'
 import { alignLyricsToTranscript } from '@/lib/lyrics-align'
 import OpenAI from 'openai'
 import { invalidateSongsCache } from '@/lib/songs-cache'
+import { generateCrazyLyrics } from '@/lib/generate-crazy-lyrics'
 
 // POST /api/songs/[songId]/auto-sync — AI-powered lyrics sync using Whisper
 export async function POST(
@@ -180,6 +181,31 @@ export async function POST(
     }
 
     console.log(`[auto-sync] Saved timestamps for ${alignResults.length} chunks`)
+
+    // Generate crazy lyrics in the background (non-blocking)
+    ;(async () => {
+      try {
+        // Build lines from the freshly-saved word timestamps
+        const lines: string[][] = []
+        for (const result of alignResults) {
+          for (const lineWords of result.wordTimestamps) {
+            if (lineWords.length > 0) {
+              lines.push(lineWords.map((w) => w.word))
+            }
+          }
+        }
+        if (lines.length > 0) {
+          const crazyLines = await generateCrazyLyrics(lines, song.language)
+          await prisma.song.update({
+            where: { id: songId },
+            data: { crazyLyrics: JSON.stringify(crazyLines) },
+          })
+          console.log(`[auto-sync] Generated crazy lyrics for "${song.title}"`)
+        }
+      } catch (err) {
+        console.warn('[auto-sync] Crazy lyrics generation failed (non-critical):', err)
+      }
+    })()
 
     invalidateSongsCache()
     return NextResponse.json({
