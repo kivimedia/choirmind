@@ -553,106 +553,116 @@ export default function KaraokeMadnessPage() {
     )
   }
 
-  // -- Playing phase (full-screen overlay) --
+  // -- Playing phase (full-screen karaoke overlay) --
   if (phase === 'playing' && assignment) {
     return (
-      <div dir="rtl" className="fixed inset-0 z-50 flex flex-col bg-background text-start">
-        {/* Fixed top controls */}
-        <div className="shrink-0 px-4 pt-3 pb-2">
-          {/* Player bar */}
+      <div dir="rtl" className="fixed inset-0 z-50 flex flex-col bg-black/95 text-center">
+        {/* Top bar: players + controls */}
+        <div className="shrink-0 px-4 pt-3 pb-2 bg-black/80 backdrop-blur-sm border-b border-white/10">
           <div className="flex items-center gap-3 mb-2">
             {effectiveNames.map((name, i) => (
               <div key={i} className="flex items-center gap-1.5">
-                <div className={`h-3 w-3 rounded-full ${PLAYER_COLORS[i].bg}`} />
-                <span className="text-sm font-medium text-foreground">{name}</span>
+                <div className={`h-3.5 w-3.5 rounded-full ${PLAYER_COLORS[i].bg} shadow-sm`}
+                  style={{ boxShadow: `0 0 8px ${PLAYER_COLORS[i].hex}60` }}
+                />
+                <span className="text-sm font-semibold text-white/90">{name}</span>
               </div>
             ))}
-            <div className="ms-auto flex items-center gap-2">
-              {/* Audio mode toggle */}
+            <div className="ms-auto flex items-center gap-3">
+              {/* Re-shuffle assignments */}
               <button
                 type="button"
-                onClick={() => setAudioMode(audioMode === 'karaoke' ? 'full' : 'karaoke')}
-                className={[
-                  'flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors border',
-                  audioMode === 'karaoke'
-                    ? 'border-purple-500/40 bg-purple-500/10 text-purple-400'
-                    : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
-                ].join(' ')}
+                onClick={() => startWithDifficulty(difficulty)}
+                className="text-sm text-white/50 hover:text-white/80 transition-colors"
+                title="חלוקה מחדש"
               >
-                {audioMode === 'karaoke' ? '\u{1F3B5}' : '\u{1F3A4}'}
-                <span>{audioMode === 'karaoke' ? 'ליווי' : '+שירה'}</span>
+                &#x1F3B2;
               </button>
-              <span className="text-xs text-text-muted">{DIFFICULTY_LABELS[difficulty]?.he}</span>
+              <span className="text-xs text-white/40">{DIFFICULTY_LABELS[difficulty]?.he}</span>
               <button
                 type="button"
                 onClick={() => {
                   audioActionsRef.current?.pause()
                   setPhase('ended')
                 }}
-                className="text-xs text-text-muted hover:text-foreground"
+                className="text-xs text-white/40 hover:text-white/70"
               >
-                סיום
+                &#x2715;
               </button>
             </div>
           </div>
 
-          {/* Audio player */}
-          <AudioPlayer
-            audioTracks={effectiveAudioTracks}
-            youtubeVideoId={audioMode === 'full' ? song.youtubeVideoId : undefined}
-            onTimeUpdate={handleTimeUpdate}
-            actionsRef={audioActionsRef}
+          {/* Audio player + vocals toggle side by side */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <AudioPlayer
+                audioTracks={effectiveAudioTracks}
+                youtubeVideoId={audioMode === 'full' ? song.youtubeVideoId : undefined}
+                onTimeUpdate={handleTimeUpdate}
+                actionsRef={audioActionsRef}
+              />
+            </div>
+            {/* Big vocals toggle */}
+            <button
+              type="button"
+              onClick={() => setAudioMode(audioMode === 'karaoke' ? 'full' : 'karaoke')}
+              className={[
+                'shrink-0 flex flex-col items-center gap-0.5 rounded-xl px-4 py-2 text-xs font-bold transition-all border-2',
+                audioMode === 'karaoke'
+                  ? 'border-purple-400/50 bg-purple-500/20 text-purple-300 hover:bg-purple-500/30'
+                  : 'border-emerald-400/50 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30',
+              ].join(' ')}
+            >
+              <span className="text-lg leading-none">{audioMode === 'karaoke' ? '\u{1F3B5}' : '\u{1F3A4}'}</span>
+              <span>{audioMode === 'karaoke' ? 'ליווי' : '+שירה'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Lyrics — center of screen, scrollable */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6">
+          <KaraokeMadnessDisplay
+            lines={assignment.lines}
+            playerNames={effectiveNames}
+            currentTimeMs={currentTimeMs}
+            language={song.language}
+            onLineClick={(lineIdx) => {
+              const line = assignment.lines[lineIdx]
+              if (line?.words.length > 0) {
+                audioActionsRef.current?.seekTo(line.words[0].startMs)
+              }
+            }}
           />
         </div>
 
-        {/* Lyrics display — scrollable middle */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-4">
-          <div className="rounded-xl border border-border bg-surface p-3 sm:p-6">
-            <KaraokeMadnessDisplay
-              lines={assignment.lines}
-              playerNames={effectiveNames}
-              currentTimeMs={currentTimeMs}
-              language={song.language}
-              onLineClick={(lineIdx) => {
-                const line = assignment.lines[lineIdx]
-                if (line?.words.length > 0) {
-                  audioActionsRef.current?.seekTo(line.words[0].startMs)
-                }
-              }}
-            />
-          </div>
+        {/* Bottom bar: difficulty switch */}
+        <div className="shrink-0 px-4 py-3 bg-black/80 backdrop-blur-sm border-t border-white/10 flex gap-2">
+          {difficulty > 0 && (
+            <button
+              type="button"
+              onClick={handlePrevLevel}
+              className="flex-1 rounded-xl border-2 border-sky-400/30 bg-sky-500/10 px-4 py-3 text-base font-bold text-sky-300 transition-transform hover:scale-[1.02] active:scale-95"
+            >
+              &#x2744;&#xFE0F; {DIFFICULTY_LABELS[difficulty - 1]?.he}
+            </button>
+          )}
+          {difficulty < 3 && (
+            <button
+              type="button"
+              onClick={handleNextLevel}
+              className="flex-1 rounded-xl bg-gradient-to-r from-rose-500 via-purple-500 to-indigo-500 px-4 py-3 text-base font-black text-white shadow-lg shadow-purple-500/30 transition-transform hover:scale-[1.02] active:scale-95"
+              style={{ animation: 'crazier-pulse 2s ease-in-out infinite' }}
+            >
+              &#x1F525; {DIFFICULTY_LABELS[difficulty + 1]?.he}
+            </button>
+          )}
+          <style>{`
+            @keyframes crazier-pulse {
+              0%, 100% { box-shadow: 0 4px 20px rgba(168, 85, 247, 0.3); }
+              50% { box-shadow: 0 4px 30px rgba(168, 85, 247, 0.5); }
+            }
+          `}</style>
         </div>
-
-        {/* Fixed bottom: difficulty switch buttons */}
-        {(difficulty > 0 || difficulty < 3) && (
-          <div className="shrink-0 px-4 py-3 flex gap-2">
-            {difficulty > 0 && (
-              <button
-                type="button"
-                onClick={handlePrevLevel}
-                className="flex-1 rounded-xl border-2 border-sky-500/40 bg-sky-500/10 px-4 py-3 text-base font-bold text-sky-400 transition-transform hover:scale-[1.02] active:scale-95"
-              >
-                &#x2744;&#xFE0F; {DIFFICULTY_LABELS[difficulty - 1]?.he}
-              </button>
-            )}
-            {difficulty < 3 && (
-              <button
-                type="button"
-                onClick={handleNextLevel}
-                className="flex-1 rounded-xl bg-gradient-to-r from-rose-500 via-purple-500 to-indigo-500 px-4 py-3 text-base font-black text-white shadow-lg shadow-purple-500/30 transition-transform hover:scale-[1.02] active:scale-95"
-                style={{ animation: 'crazier-pulse 2s ease-in-out infinite' }}
-              >
-                &#x1F525; {DIFFICULTY_LABELS[difficulty + 1]?.he}
-              </button>
-            )}
-            <style>{`
-              @keyframes crazier-pulse {
-                0%, 100% { box-shadow: 0 4px 20px rgba(168, 85, 247, 0.3); }
-                50% { box-shadow: 0 4px 30px rgba(168, 85, 247, 0.5); }
-              }
-            `}</style>
-          </div>
-        )}
       </div>
     )
   }
