@@ -196,15 +196,29 @@ interface LyricsSearchResult {
 // ── Clean YouTube title for lyrics search ───────────────────────────
 
 function cleanYoutubeTitle(raw: string): string {
-  return raw
-    // Remove common YouTube suffixes
-    .replace(/\s*[\(\[](official\s*(music\s*)?video|lyric\s*video|audio|visualizer|hd|hq|4k|lyrics)[\)\]]/gi, '')
-    .replace(/\s*[-–|]\s*(official\s*(music\s*)?video|lyric\s*video|audio|visualizer|lyrics)\s*$/gi, '')
+  let t = raw
+    // Remove parenthetical/bracketed junk
+    .replace(/\s*[\(\[](official\s*(music\s*)?video|lyric\s*video|audio|visualizer|hd|hq|4k|lyrics|end\s*title|soundtrack|ost)[\)\]]/gi, '')
+    // Remove "(from "Movie")" / "(from Movie)"
+    .replace(/\s*\(from\s+[""]?[^)]+[""]?\)/gi, '')
+    // Remove trailing suffixes after dash/pipe
+    .replace(/\s*[-–|]\s*(official\s*(music\s*)?video|lyric\s*video|audio|visualizer|lyrics|hd|hq)\s*$/gi, '')
     // Remove "ft./feat." collaborator tags
     .replace(/\s*(ft\.?|feat\.?)\s+.*/i, '')
     // Remove trailing whitespace/dashes
     .replace(/\s*[-–|]\s*$/, '')
     .trim()
+  return t
+}
+
+/** Split "Artist - Song Name" → { artist, song }. Returns null if no split found. */
+function splitArtistSong(title: string): { artist: string; song: string } | null {
+  // Common YouTube pattern: "Artist - Song Name"
+  const dashMatch = title.match(/^(.+?)\s*[-–]\s+(.+)$/)
+  if (dashMatch && dashMatch[2].length >= 3) {
+    return { artist: dashMatch[1].trim(), song: dashMatch[2].trim() }
+  }
+  return null
 }
 
 // ── Component ───────────────────────────────────────────────────────
@@ -361,53 +375,91 @@ export default function NewSongPage() {
 
       if (cancelled) return
 
-      // Auto-fill title if empty
+      // Clean and split the YouTube title
+      const cleanedTitle = cleanYoutubeTitle(videoTitle)
+      const split = splitArtistSong(cleanedTitle)
+
+      // Auto-fill title: prefer just the song name part
       if (videoTitle && !title.trim()) {
-        const cleaned = cleanYoutubeTitle(videoTitle)
-        setTitle(cleaned)
+        setTitle(split ? split.song : cleanedTitle)
       }
 
-      // Auto-fill composer from channel name if empty
-      if (videoAuthor && !composer.trim()) {
-        setComposer(videoAuthor)
+      // Auto-fill composer: prefer artist from title over channel name
+      if (!composer.trim()) {
+        if (split?.artist) {
+          setComposer(split.artist)
+        } else if (videoAuthor) {
+          setComposer(videoAuthor)
+        }
       }
 
-      // Step 2: Search for lyrics using the (cleaned) title
-      const searchTitle = title.trim() || cleanYoutubeTitle(videoTitle)
-      if (!searchTitle) return
+      // Step 2: Search for lyrics — try multiple strategies
+      const songName = split ? split.song : cleanedTitle
+      const artistName = split?.artist || ''
+      if (!songName && !cleanedTitle) return
 
-      // Detect language from the title so we search the right sites
-      const titleLang = detectLanguage(searchTitle)
+      // Detect language from the song name
+      const titleLang = detectLanguage(songName || cleanedTitle)
       setLanguage(titleLang)
 
       setLyricsSearching(true)
       setLyricsSearchDone(false)
       setLyricsResults([])
 
-      try {
-        const params = new URLSearchParams({ q: searchTitle, lang: titleLang })
-        if (composer.trim() || videoAuthor) {
-          params.set('composer', composer.trim() || videoAuthor)
-        }
+      // Helper: run a single lyrics search query
+      async function trySearch(q: string, comp: string, lang: string): Promise<{ results: LyricsSearchResult[]; searchLinks: { label: string; url: string }[] }> {
+        const params = new URLSearchParams({ q, lang })
+        if (comp) params.set('composer', comp)
         const res = await fetch(`/api/lyrics-search?${params}`)
-        if (res.ok && !cancelled) {
-          const data = await res.json()
-          const results: LyricsSearchResult[] = data.results || []
-          setLyricsResults(results)
-          setLyricsSearchLinks(data.searchLinks || [])
+        if (res.ok) return res.json()
+        return { results: [], searchLinks: [] }
+      }
+
+      try {
+        let allResults: LyricsSearchResult[] = []
+        let searchLinks: { label: string; url: string }[] = []
+
+        // Strategy 1: Just the song name (best for "Artist - Song" titles)
+        if (songName) {
+          const data = await trySearch(songName, artistName, titleLang)
+          if (!cancelled) {
+            allResults = data.results || []
+            searchLinks = data.searchLinks || []
+          }
+        }
+
+        // Strategy 2: If no results, try the full cleaned title
+        if (allResults.length === 0 && cleanedTitle !== songName && !cancelled) {
+          const data = await trySearch(cleanedTitle, '', titleLang)
+          if (!cancelled) {
+            allResults = data.results || []
+            searchLinks = data.searchLinks || []
+          }
+        }
+
+        // Strategy 3: If still nothing, try song name without composer
+        if (allResults.length === 0 && songName && artistName && !cancelled) {
+          const data = await trySearch(songName, '', titleLang)
+          if (!cancelled) {
+            allResults = data.results || []
+            searchLinks = data.searchLinks || []
+          }
+        }
+
+        if (!cancelled) {
+          setLyricsResults(allResults)
+          setLyricsSearchLinks(searchLinks)
 
           // Auto-pick the best result — populate lyrics immediately
-          if (results.length > 0) {
-            const best = results[0]
-            // Populate lyrics textarea + auto-detect chunks
+          if (allResults.length > 0) {
+            const best = allResults[0]
             setPastedLyrics(best.lyrics)
             const chunks = autoDetectChunks(best.lyrics)
             setDetectedChunks(chunks)
             const detected = detectLanguage(best.lyrics)
             setLanguage(detected)
             setActiveTab('paste')
-            // Fill artist if we don't have one
-            if (best.artist && !composer.trim() && !videoAuthor) {
+            if (best.artist && !composer.trim() && !split?.artist) {
               setComposer(best.artist)
             }
           }

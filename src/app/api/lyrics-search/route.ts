@@ -333,40 +333,55 @@ async function searchTab4u(title: string): Promise<LyricsResult[]> {
 // ---------------------------------------------------------------------------
 
 async function searchLrclib(title: string, artist: string): Promise<LyricsResult[]> {
-  const searchQuery = artist ? `${title} ${artist}` : title
-  const url = `https://lrclib.net/api/search?q=${encodeURIComponent(searchQuery)}`
+  // Try multiple search strategies for better hit rate
+  const queries: string[] = []
 
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'ChoirMind/1.0 (https://choirmind.app)',
-    },
-    signal: AbortSignal.timeout(5000),
-  })
+  // Strategy 1: title + artist (most specific)
+  if (artist) queries.push(`${title} ${artist}`)
+  // Strategy 2: just the title
+  queries.push(title)
 
-  if (!res.ok) return []
+  for (const searchQuery of queries) {
+    const url = `https://lrclib.net/api/search?q=${encodeURIComponent(searchQuery)}`
 
-  const data: Array<{
-    trackName: string
-    artistName: string
-    plainLyrics: string | null
-    syncedLyrics: string | null
-  }> = await res.json()
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': 'ChoirMind/1.0 (https://choirmind.app)',
+        },
+        signal: AbortSignal.timeout(5000),
+      })
 
-  const results: LyricsResult[] = []
+      if (!res.ok) continue
 
-  for (const item of data.slice(0, 2)) {
-    const lyrics = item.plainLyrics || stripSyncedLyrics(item.syncedLyrics)
-    if (!lyrics || lyrics.trim().length < 10) continue
+      const data: Array<{
+        trackName: string
+        artistName: string
+        plainLyrics: string | null
+        syncedLyrics: string | null
+      }> = await res.json()
 
-    results.push({
-      source: 'LRCLIB',
-      title: item.trackName,
-      artist: item.artistName,
-      lyrics: lyrics.trim(),
-    })
+      const results: LyricsResult[] = []
+
+      for (const item of data.slice(0, 3)) {
+        const lyrics = item.plainLyrics || stripSyncedLyrics(item.syncedLyrics)
+        if (!lyrics || lyrics.trim().length < 10) continue
+
+        results.push({
+          source: 'LRCLIB',
+          title: item.trackName,
+          artist: item.artistName,
+          lyrics: lyrics.trim(),
+        })
+      }
+
+      if (results.length > 0) return results
+    } catch {
+      // Try next strategy
+    }
   }
 
-  return results
+  return []
 }
 
 function stripSyncedLyrics(synced: string | null): string {
