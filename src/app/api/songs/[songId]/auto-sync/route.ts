@@ -143,7 +143,7 @@ export async function POST(
       model: 'whisper-1',
       response_format: 'verbose_json',
       timestamp_granularities: ['word', 'segment'],
-      language: song.language === 'he' ? 'he' : song.language === 'en' ? 'en' : undefined,
+      language: song.language && song.language !== 'mixed' && song.language !== 'other' ? song.language : undefined,
     })
 
     const words = (whisperResponse as any).words ?? []
