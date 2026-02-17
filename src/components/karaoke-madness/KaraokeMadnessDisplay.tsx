@@ -4,8 +4,8 @@ import { useMemo, useEffect, useRef } from 'react'
 import type { AssignedLine } from '@/lib/karaoke-madness'
 import { PLAYER_COLORS, EVERYONE } from '@/lib/karaoke-madness'
 
-/** Color used for EVERYONE (-1) lines — a white/gold "all together" style. */
-const EVERYONE_COLOR = { bg: 'bg-white', text: 'text-yellow-300', glow: '', hex: '#fbbf24' }
+/** Color used for EVERYONE (-1) lines — green "all together" style. */
+const EVERYONE_COLOR = { bg: 'bg-green-400', text: 'text-green-400', glow: 'shadow-green-400/50', hex: '#4ade80' }
 
 interface KaraokeMadnessDisplayProps {
   /** Assigned lines with player-colored words. */

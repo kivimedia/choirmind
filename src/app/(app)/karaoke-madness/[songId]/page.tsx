@@ -563,6 +563,20 @@ export default function KaraokeMadnessPage() {
               </div>
             ))}
             <div className="ms-auto flex items-center gap-2">
+              {/* Audio mode toggle */}
+              <button
+                type="button"
+                onClick={() => setAudioMode(audioMode === 'karaoke' ? 'full' : 'karaoke')}
+                className={[
+                  'flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors border',
+                  audioMode === 'karaoke'
+                    ? 'border-purple-500/40 bg-purple-500/10 text-purple-400'
+                    : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
+                ].join(' ')}
+              >
+                {audioMode === 'karaoke' ? '\u{1F3B5}' : '\u{1F3A4}'}
+                <span>{audioMode === 'karaoke' ? 'ליווי' : '+שירה'}</span>
+              </button>
               <span className="text-xs text-text-muted">{DIFFICULTY_LABELS[difficulty]?.he}</span>
               <button
                 type="button"
