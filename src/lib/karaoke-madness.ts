@@ -244,11 +244,12 @@ function sprinkleEveryone(
 
 /**
  * Sprinkle EVERYONE on individual words within lines (for levels 2-3).
- * ~12% of individual words become EVERYONE for extra chaos.
+ * @param rate — probability per word (e.g. 0.12 for level 2, 0.22 for level 3)
  */
 function sprinkleEveryoneWords(
   lines: AssignedLine[],
   rand: () => number,
+  rate: number = 0.12,
 ): AssignedLine[] {
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li]
@@ -258,7 +259,7 @@ function sprinkleEveryoneWords(
 
     let changed = false
     const newWords = line.words.map((w) => {
-      if (w.player !== EVERYONE && rand() < 0.12) {
+      if (w.player !== EVERYONE && rand() < rate) {
         changed = true
         return { ...w, player: EVERYONE }
       }
@@ -452,7 +453,7 @@ export function generateAssignments(
       lines = assignLevel3(wordTimestamps, playerCount, rand)
       lines = markChorusesAsEveryone(lines, chunkInfos)
       lines = sprinkleEveryone(lines, rand)
-      lines = sprinkleEveryoneWords(lines, rand)
+      lines = sprinkleEveryoneWords(lines, rand, 0.22)
       break
   }
 
