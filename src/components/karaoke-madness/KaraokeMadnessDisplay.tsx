@@ -18,6 +18,8 @@ interface KaraokeMadnessDisplayProps {
   language?: string
   /** Latency offset in ms subtracted from word timestamps. */
   latencyOffsetMs?: number
+  /** Called when user clicks a line — pass line index for seeking. */
+  onLineClick?: (lineIdx: number) => void
 }
 
 const DEFAULT_LATENCY_OFFSET_MS = 500
@@ -33,6 +35,7 @@ export default function KaraokeMadnessDisplay({
   currentTimeMs,
   language = 'he',
   latencyOffsetMs = DEFAULT_LATENCY_OFFSET_MS,
+  onLineClick,
 }: KaraokeMadnessDisplayProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const isRTL = language === 'he'
@@ -116,8 +119,10 @@ export default function KaraokeMadnessDisplay({
         return (
           <div
             key={lineIdx}
+            onClick={() => line.words.length > 0 && onLineClick?.(lineIdx)}
             className={[
               'mb-2 min-h-[2em] rounded-lg px-2 py-0.5 transition-all duration-500',
+              onLineClick && line.words.length > 0 ? 'cursor-pointer hover:bg-white/5' : '',
               isPast ? 'opacity-30' : '',
               isUpcomingLine ? 'opacity-70' : '',
               !isPast && !isActiveLine && !isUpcomingLine && activeLineIdx >= 0 ? 'opacity-40' : '',

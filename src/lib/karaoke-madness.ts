@@ -381,7 +381,7 @@ export function generateAssignments(
       break
     case 3:
       lines = assignLevel3(wordTimestamps, playerCount, rand)
-      // Level 3 is pure chaos — no chorus exception
+      lines = markChorusesAsEveryone(lines, chunkInfos)
       break
   }
 

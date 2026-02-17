@@ -551,40 +551,33 @@ export default function KaraokeMadnessPage() {
   // -- Playing phase --
   if (phase === 'playing' && assignment) {
     return (
-      <div dir="rtl" className="flex flex-col min-h-[calc(100dvh-8rem)] text-start">
-        {/* Player bar */}
-        <div className="flex items-center gap-3 mb-3 shrink-0">
-          {effectiveNames.map((name, i) => (
-            <div key={i} className="flex items-center gap-1.5">
-              <div className={`h-3 w-3 rounded-full ${PLAYER_COLORS[i].bg}`} />
-              <span className="text-sm font-medium text-foreground">{name}</span>
-            </div>
-          ))}
-          <div className="ms-auto flex items-center gap-2">
-            {difficulty < 3 && (
+      <div dir="rtl" className="flex flex-col h-[calc(100dvh-4rem)] text-start">
+        {/* Sticky top controls */}
+        <div className="sticky top-0 z-10 bg-background pb-2 shrink-0">
+          {/* Player bar */}
+          <div className="flex items-center gap-3 mb-2">
+            {effectiveNames.map((name, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <div className={`h-3 w-3 rounded-full ${PLAYER_COLORS[i].bg}`} />
+                <span className="text-sm font-medium text-foreground">{name}</span>
+              </div>
+            ))}
+            <div className="ms-auto flex items-center gap-2">
+              <span className="text-xs text-text-muted">{DIFFICULTY_LABELS[difficulty]?.he}</span>
               <button
                 type="button"
-                onClick={handleNextLevel}
-                className="text-xs text-primary hover:text-primary/80 font-medium"
+                onClick={() => {
+                  audioActionsRef.current?.pause()
+                  setPhase('ended')
+                }}
+                className="text-xs text-text-muted hover:text-foreground"
               >
-                {DIFFICULTY_LABELS[difficulty + 1]?.he} &#x25B6;
+                סיום
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                audioActionsRef.current?.pause()
-                setPhase('ended')
-              }}
-              className="text-xs text-text-muted hover:text-foreground"
-            >
-              סיום
-            </button>
+            </div>
           </div>
-        </div>
 
-        {/* Audio player */}
-        <div className="mb-3 shrink-0">
+          {/* Audio player */}
           <AudioPlayer
             audioTracks={effectiveAudioTracks}
             youtubeVideoId={audioMode === 'full' ? song.youtubeVideoId : undefined}
@@ -600,8 +593,34 @@ export default function KaraokeMadnessPage() {
             playerNames={effectiveNames}
             currentTimeMs={currentTimeMs}
             language={song.language}
+            onLineClick={(lineIdx) => {
+              const line = assignment.lines[lineIdx]
+              if (line?.words.length > 0) {
+                audioActionsRef.current?.seekTo(line.words[0].startMs)
+              }
+            }}
           />
         </div>
+
+        {/* Big "Make it crazier" button — fixed at bottom */}
+        {difficulty < 3 && (
+          <div className="shrink-0 pb-3">
+            <button
+              type="button"
+              onClick={handleNextLevel}
+              className="w-full rounded-xl bg-gradient-to-r from-rose-500 via-purple-500 to-indigo-500 px-6 py-3 text-lg font-black text-white shadow-lg shadow-purple-500/30 transition-transform hover:scale-[1.02] active:scale-95"
+              style={{ animation: 'crazier-pulse 2s ease-in-out infinite' }}
+            >
+              &#x1F525; {DIFFICULTY_LABELS[difficulty + 1]?.he} &#x2014; יאללה טירוף! &#x1F525;
+            </button>
+            <style>{`
+              @keyframes crazier-pulse {
+                0%, 100% { box-shadow: 0 4px 20px rgba(168, 85, 247, 0.3); }
+                50% { box-shadow: 0 4px 30px rgba(168, 85, 247, 0.5); }
+              }
+            `}</style>
+          </div>
+        )}
       </div>
     )
   }
