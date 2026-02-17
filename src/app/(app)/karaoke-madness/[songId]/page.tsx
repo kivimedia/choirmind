@@ -614,7 +614,7 @@ export default function KaraokeMadnessPage() {
               ].join(' ')}
             >
               <span className="text-lg leading-none">{audioMode === 'karaoke' ? '\u{1F3B5}' : '\u{1F3A4}'}</span>
-              <span>{audioMode === 'karaoke' ? 'ליווי' : '+שירה'}</span>
+              <span>{audioMode === 'karaoke' ? 'קריוקי' : '+שירה'}</span>
             </button>
           </div>
         </div>
