@@ -53,7 +53,7 @@ export async function POST(
       return NextResponse.json({ error: 'Song has no word timestamps' }, { status: 400 })
     }
 
-    const validated = await generateCrazyLyrics(lines, song.language)
+    const validated = await generateCrazyLyrics(lines, song.language, song.title)
 
     // Save to database
     await prisma.song.update({

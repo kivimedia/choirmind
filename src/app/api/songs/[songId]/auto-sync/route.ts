@@ -195,7 +195,7 @@ export async function POST(
           }
         }
         if (lines.length > 0) {
-          const crazyLines = await generateCrazyLyrics(lines, song.language)
+          const crazyLines = await generateCrazyLyrics(lines, song.language, song.title)
           await prisma.song.update({
             where: { id: songId },
             data: { crazyLyrics: JSON.stringify(crazyLines) },

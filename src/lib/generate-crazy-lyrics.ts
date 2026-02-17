@@ -15,11 +15,13 @@ const LANG_NAMES: Record<string, string> = {
  * Generate crazy replacement lyrics for the given lines.
  * @param lines - Array of lines, each line is an array of words
  * @param language - Song language code (he, en, fr, mixed, etc.)
+ * @param songTitle - Optional song title for diagnostic logging
  * @returns Validated array of replacement lines with correct word counts
  */
 export async function generateCrazyLyrics(
   lines: string[][],
   language: string,
+  songTitle?: string,
 ): Promise<string[][]> {
   const anthropicKey = process.env.ANTHROPIC_API_KEY
   const vocalServiceUrl = process.env.VOCAL_SERVICE_URL
@@ -67,7 +69,9 @@ Empty lines = [].`
     }
 
     const anthropicData = await anthropicRes.json()
-    const text = anthropicData.content?.[0]?.text?.trim() ?? ''
+    const raw = anthropicData.content?.[0]?.text?.trim() ?? ''
+    // Strip markdown fences (```json ... ```) that Haiku sometimes adds
+    const text = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')
     const jsonMatch = text.match(/\[[\s\S]*\]/)
     if (!jsonMatch) {
       throw new Error('Failed to parse AI response')
@@ -92,22 +96,33 @@ Empty lines = [].`
 
   // Validate and fix structure — ensure each line has correct word count
   const validated: string[][] = []
+  let trimmed = 0, padded = 0, fallen = 0
   for (let i = 0; i < lines.length; i++) {
     const original = lines[i]
     const crazy = result[i]
     if (!crazy || !Array.isArray(crazy)) {
       validated.push(original)
+      fallen++
     } else if (crazy.length === original.length) {
       validated.push(crazy.map(String))
     } else if (crazy.length > original.length) {
       validated.push(crazy.slice(0, original.length).map(String))
+      trimmed++
     } else {
-      const padded = crazy.map(String)
-      while (padded.length < original.length) {
-        padded.push(original[padded.length])
+      const p = crazy.map(String)
+      while (p.length < original.length) {
+        p.push(original[p.length])
       }
-      validated.push(padded)
+      validated.push(p)
+      padded++
     }
+  }
+
+  if (trimmed > 0 || padded > 0 || fallen > 0) {
+    const label = songTitle || `${language}/${lines.length}lines`
+    console.warn(
+      `[crazy-lyrics] ${label}: trimmed ${trimmed}, padded ${padded}, fallback ${fallen} of ${lines.length} lines`
+    )
   }
 
   return validated
