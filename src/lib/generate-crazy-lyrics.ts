@@ -36,8 +36,9 @@ export async function generateCrazyLyrics(
 RULES:
 1. Each line MUST have EXACTLY the same number of words as the original
 2. If the original lyrics are emotional or dramatic, make replacements aggressively mundane (grocery lists, plumbing problems, parking tickets). If the original is casual, make replacements absurdly dramatic and epic.
-3. Family-friendly, grammatically coherent enough to sing
-4. Do NOT reuse original words
+3. Make exactly ONE line near the middle sound completely normal and sincere — a "straight man" line. Every other line should be absurd. The sudden sanity in a sea of nonsense is the funniest part.
+4. Family-friendly, grammatically coherent enough to sing
+5. Do NOT reuse original words
 
 LINES (number, [word count], original):
 ${lineSpecs}
