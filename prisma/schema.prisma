@@ -151,6 +151,9 @@ model Song {
   concertOrder  Int?
   tags          String?  // JSON array stored as string
   archivedAt    DateTime? // null = active, set = archived
+  processingStatus  String?  // PENDING, PROCESSING, READY, FAILED
+  processingStage   String?  // downloading, separating, syncing
+  processingError   String?  // Error message if FAILED
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -360,6 +363,31 @@ model VocalPracticeSession {
   analysisJob    VocalAnalysisJob?
 
   @@index([userId, songId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Processed Video Cache (YouTube import dedup)
+// ---------------------------------------------------------------------------
+
+model ProcessedVideo {
+  id                 String   @id @default(uuid())
+  youtubeVideoId     String   @unique
+  title              String?
+  durationMs         Int?
+
+  // Shared S3 audio files
+  fullAudioUrl       String   // full mix from yt-dlp
+  fullAudioS3Key     String   // S3 key for the full audio
+  accompanimentUrl   String?  // Demucs no_vocals
+  vocalsUrl          String?  // Demucs vocals
+
+  // Shared Whisper sync data
+  wordTimestamps     String?  // JSON — per-line WordTimestamp[][] from Whisper
+  transcription      String?  // Whisper raw transcription text
+
+  usageCount         Int      @default(1)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
 
 model UserVocalQuota {

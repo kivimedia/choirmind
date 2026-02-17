@@ -62,17 +62,18 @@ image = (
         "pydantic",
         "demucs",
         "yt-dlp",
+        "openai",
     )
     .run_commands("pip uninstall -y yt-dlp-get-pot bgutil-ytdlp-pot-provider 2>/dev/null || true")
     .env({"TORCHAUDIO_BACKEND": "soundfile", "TORCH_HOME": "/root/.cache/torch"})
-    # Pre-download all 4 Demucs htdemucs_ft checkpoint files into the image.
+    # Pre-download all 4 Demucs htdemucs_ft checkpoint files + htdemucs (fast) into the image.
     # Using Python+urllib to guarantee files persist on disk in the image layer.
     .run_commands(
         "python -c \""
         "import urllib.request, os; "
         "d='/root/.cache/torch/hub/checkpoints'; os.makedirs(d, exist_ok=True); "
         "base='https://dl.fbaipublicfiles.com/demucs/hybrid_transformer'; "
-        "names=['f7e0c4bc-ba3fe64a','d12395a8-e57c48e6','92cfc3b6-ef3bcb9c','04573f0d-f3cf25b2']; "
+        "names=['f7e0c4bc-ba3fe64a','d12395a8-e57c48e6','92cfc3b6-ef3bcb9c','04573f0d-f3cf25b2','955717e8-8726e21a']; "
         "[urllib.request.urlretrieve(f'{base}/{n}.th', f'{d}/{n}.th') or print(f'Downloaded {n}.th') for n in names]; "
         "print('Files:', os.listdir(d))"
         "\""
@@ -80,6 +81,7 @@ image = (
     .add_local_file("processing.py", "/root/processing.py")
     .add_local_file("scoring.py", "/root/scoring.py")
     .add_local_file("coaching.py", "/root/coaching.py")
+    .add_local_file("crazy_lyrics.py", "/root/crazy_lyrics.py")
 )
 
 app = modal.App(
@@ -121,6 +123,18 @@ class YouTubeExtractRequest(BaseModel):
 
 class SeparateStemsRequest(BaseModel):
     s3_key: str
+
+
+class ProcessFastRequest(BaseModel):
+    youtube_url: Optional[str] = None  # if needs downloading
+    s3_key: Optional[str] = None       # if already on S3
+    song_id: Optional[str] = None      # to update DB directly
+    language: str = "he"
+
+
+class CrazyLyricsRequest(BaseModel):
+    lines: list[list[str]]  # original words per line
+    language: str = "he"
 
 
 class CompressAudioRequest(BaseModel):
@@ -728,6 +742,37 @@ def run_demucs_isolation(audio_bytes: bytes, filename: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# GPU function: Fast Demucs (htdemucs model for speed)
+# ---------------------------------------------------------------------------
+
+
+@app.function(gpu="T4", timeout=300)
+def run_demucs_fast(audio_bytes: bytes, filename: str) -> dict:
+    """Fast Demucs on T4 GPU using htdemucs model (~2-3x faster than htdemucs_ft)."""
+    from processing import isolate_vocals_fast
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = os.path.join(tmpdir, filename)
+        with open(input_path, "wb") as f:
+            f.write(audio_bytes)
+
+        output_dir = os.path.join(tmpdir, "output")
+        os.makedirs(output_dir, exist_ok=True)
+
+        vocal_path, accompaniment_path = isolate_vocals_fast(input_path, output_dir)
+
+        with open(vocal_path, "rb") as f:
+            vocal_bytes = f.read()
+
+        accompaniment_bytes = None
+        if accompaniment_path and os.path.isfile(accompaniment_path):
+            with open(accompaniment_path, "rb") as f:
+                accompaniment_bytes = f.read()
+
+        return {"vocals": vocal_bytes, "accompaniment": accompaniment_bytes}
+
+
+# ---------------------------------------------------------------------------
 # CPU function: Feature extraction
 # ---------------------------------------------------------------------------
 
@@ -1250,6 +1295,220 @@ async def prepare_reference(req: PrepareReferenceRequest):
 
 
 # ---------------------------------------------------------------------------
+# Whisper transcription helper
+# ---------------------------------------------------------------------------
+
+
+def _run_whisper(audio_path: str, language: str = "he") -> dict:
+    """Transcribe audio using OpenAI Whisper API with word-level timestamps."""
+    import openai
+
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        logger.warning("OPENAI_API_KEY not set, skipping Whisper transcription")
+        return {"text": "", "words": [], "segments": []}
+
+    client = openai.OpenAI(api_key=api_key)
+    with open(audio_path, "rb") as f:
+        result = client.audio.transcriptions.create(
+            file=f,
+            model="whisper-1",
+            response_format="verbose_json",
+            timestamp_granularities=["word", "segment"],
+            language=language if language != "other" else None,
+        )
+    return {
+        "text": result.text,
+        "words": [{"word": w.word, "start": w.start, "end": w.end} for w in (result.words or [])],
+        "segments": [{"text": s.text, "start": s.start, "end": s.end} for s in (result.segments or [])],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Fast-track endpoint: download + Demucs + Whisper in parallel
+# ---------------------------------------------------------------------------
+
+
+@web_app.post("/api/v1/process-fast")
+async def process_fast(req: ProcessFastRequest):
+    """All-in-one fast processing: downloads audio, runs Demucs (fast model) and
+    Whisper transcription in parallel. Returns audio URLs + stems + timestamps.
+
+    Used for initial song setup (KM/practice), not for vocal analysis scoring.
+    """
+    import subprocess
+    import random
+    from concurrent.futures import ThreadPoolExecutor
+
+    logger.info(
+        "process-fast: youtube_url=%s s3_key=%s song_id=%s lang=%s",
+        req.youtube_url, req.s3_key, req.song_id, req.language,
+    )
+
+    if not req.youtube_url and not req.s3_key:
+        raise HTTPException(status_code=400, detail="Either youtube_url or s3_key required")
+
+    try:
+        t0 = time.time()
+
+        # ── Phase 1: Get audio file ────────────────────────────────────
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wav_path = os.path.join(tmpdir, "audio.wav")
+
+            if req.s3_key:
+                # Download from S3
+                _download_from_s3(req.s3_key, wav_path)
+                audio_s3_key = req.s3_key
+            else:
+                # Download from YouTube
+                proxy_url = os.environ.get("RESIDENTIAL_PROXY_URL", "")
+                if not proxy_url:
+                    raise HTTPException(status_code=500, detail="Residential proxy not configured")
+
+                session_id = random.randint(100000, 999999)
+                proxy = proxy_url.replace("{SESSION}", str(session_id))
+                output_template = os.path.join(tmpdir, "audio.%(ext)s")
+
+                logger.info("process-fast: downloading via yt-dlp (session=%d)", session_id)
+                result = subprocess.run(
+                    [
+                        "yt-dlp",
+                        "--proxy", proxy,
+                        "--no-playlist",
+                        "-x",
+                        "--audio-format", "wav",
+                        "--audio-quality", "0",
+                        "--js-runtimes", "node:/usr/local/bin/node",
+                        "--remote-components", "ejs:github",
+                        "--no-check-certificates",
+                        "-o", output_template,
+                        req.youtube_url,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=180,
+                )
+
+                if result.returncode != 0:
+                    error_detail = result.stderr[:300] if result.stderr else "Unknown error"
+                    raise HTTPException(status_code=422, detail=f"yt-dlp failed: {error_detail}")
+
+                # Find output file
+                if not os.path.exists(wav_path):
+                    for f in os.listdir(tmpdir):
+                        if f.startswith("audio."):
+                            src = os.path.join(tmpdir, f)
+                            if not f.endswith(".wav"):
+                                subprocess.run(
+                                    ["ffmpeg", "-y", "-i", src, "-ar", "44100", "-ac", "2", wav_path],
+                                    check=True, capture_output=True, timeout=120,
+                                )
+                            else:
+                                wav_path = src
+                            break
+
+                if not os.path.exists(wav_path):
+                    raise HTTPException(status_code=500, detail="Failed to extract audio")
+
+                # Upload full audio to S3
+                audio_s3_key = f"youtube-imports/{uuid.uuid4()}.wav"
+                audio_url = _upload_to_s3(wav_path, audio_s3_key, content_type="audio/wav")
+
+            # Get duration
+            import soundfile as sf
+            info = sf.info(wav_path)
+            duration_ms = int(info.duration * 1000)
+
+            if req.s3_key:
+                bucket = os.environ["AWS_S3_BUCKET"]
+                region = os.environ.get("AWS_REGION", "eu-west-1")
+                audio_url = f"https://{bucket}.s3.{region}.amazonaws.com/{audio_s3_key}"
+
+            logger.info("process-fast: audio ready (%.1fs, %dms)", time.time() - t0, duration_ms)
+
+            # ── Phase 2: Demucs + Whisper in parallel ──────────────────
+            with open(wav_path, "rb") as f:
+                audio_bytes = f.read()
+
+            demucs_result = {}
+            whisper_result = {}
+
+            def _run_demucs():
+                nonlocal demucs_result
+                t1 = time.time()
+                demucs_result = run_demucs_fast.remote(audio_bytes, "audio.wav")
+                logger.info("process-fast: Demucs done (%.1fs)", time.time() - t1)
+
+            def _run_whisper_task():
+                nonlocal whisper_result
+                t1 = time.time()
+                whisper_result = _run_whisper(wav_path, req.language)
+                logger.info("process-fast: Whisper done (%.1fs)", time.time() - t1)
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                future_demucs = pool.submit(_run_demucs)
+                future_whisper = pool.submit(_run_whisper_task)
+                future_demucs.result()
+                future_whisper.result()
+
+            # ── Phase 3: Upload stems to S3 ────────────────────────────
+            base_key = audio_s3_key.rsplit(".", 1)[0]
+            accompaniment_url = None
+            accompaniment_s3_key = None
+            vocals_url = None
+
+            if demucs_result.get("accompaniment"):
+                acc_path = os.path.join(tmpdir, "accompaniment.wav")
+                with open(acc_path, "wb") as f:
+                    f.write(demucs_result["accompaniment"])
+                accompaniment_s3_key = f"{base_key}_accompaniment.wav"
+                accompaniment_url = _upload_to_s3(acc_path, accompaniment_s3_key, "audio/wav")
+
+            if demucs_result.get("vocals"):
+                voc_path = os.path.join(tmpdir, "vocals.wav")
+                with open(voc_path, "wb") as f:
+                    f.write(demucs_result["vocals"])
+                vocals_s3_key = f"{base_key}_vocals.wav"
+                vocals_url = _upload_to_s3(voc_path, vocals_s3_key, "audio/wav")
+
+            # Build word timestamps in the format the frontend expects
+            word_timestamps = []
+            if whisper_result.get("words"):
+                for w in whisper_result["words"]:
+                    word_timestamps.append({
+                        "word": w["word"].strip(),
+                        "startMs": int(w["start"] * 1000),
+                        "endMs": int(w["end"] * 1000),
+                    })
+
+            total_time = time.time() - t0
+            logger.info(
+                "process-fast: DONE in %.1fs — audio=%s stems=%s whisper_words=%d",
+                total_time, audio_s3_key,
+                "yes" if accompaniment_url else "no",
+                len(word_timestamps),
+            )
+
+            return {
+                "audio_s3_key": audio_s3_key,
+                "audio_url": audio_url,
+                "accompaniment_s3_key": accompaniment_s3_key,
+                "accompaniment_url": accompaniment_url,
+                "vocals_url": vocals_url,
+                "duration_ms": duration_ms,
+                "transcription": whisper_result.get("text", ""),
+                "word_timestamps": word_timestamps,
+            }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        error_msg = f"{type(exc).__name__}: {exc}"
+        logger.error("process-fast failed: %s\n%s", error_msg, traceback.format_exc())
+        raise HTTPException(status_code=500, detail=error_msg[:500])
+
+
+# ---------------------------------------------------------------------------
 # Audio compression endpoint (for Whisper API 25MB limit)
 # ---------------------------------------------------------------------------
 
@@ -1486,6 +1745,27 @@ async def separate_stems(req: SeparateStemsRequest):
     except Exception as exc:
         error_msg = f"{type(exc).__name__}: {exc}"
         logger.error("separate-stems failed: %s", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg[:300])
+
+
+# ---------------------------------------------------------------------------
+# Crazy Lyrics endpoint
+# ---------------------------------------------------------------------------
+
+
+@web_app.post("/api/v1/crazy-lyrics")
+async def crazy_lyrics(req: CrazyLyricsRequest):
+    """Generate absurd replacement lyrics matching word counts per line."""
+    from crazy_lyrics import generate_crazy_lyrics
+
+    logger.info("crazy-lyrics: %d lines, language=%s", len(req.lines), req.language)
+
+    try:
+        result = generate_crazy_lyrics(req.lines, req.language)
+        return {"crazy_lines": result}
+    except Exception as exc:
+        error_msg = f"{type(exc).__name__}: {exc}"
+        logger.error("crazy-lyrics failed: %s", error_msg)
         raise HTTPException(status_code=500, detail=error_msg[:300])
 
 

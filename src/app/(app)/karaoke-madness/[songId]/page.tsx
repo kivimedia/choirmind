@@ -7,6 +7,7 @@ import Card from '@/components/ui/Card'
 import AudioPlayer from '@/components/audio/AudioPlayer'
 import type { AudioActions } from '@/components/audio/AudioPlayer'
 import KaraokeMadnessDisplay from '@/components/karaoke-madness/KaraokeMadnessDisplay'
+import ChaosOverlay from '@/components/karaoke-madness/ChaosOverlay'
 import {
   generateAssignments,
   computeGameStats,
@@ -103,21 +104,26 @@ export default function KaraokeMadnessPage() {
   const [error, setError] = useState<string | null>(null)
 
   // Setup state — restore from localStorage
-  const [playerCount, setPlayerCount] = useState<2 | 3 | 4>(() => {
+  const [playerCount, setPlayerCount] = useState<2 | 3 | 4 | 5 | 6>(() => {
     if (typeof window === 'undefined') return 2
     const saved = localStorage.getItem('km_playerCount')
-    return saved ? (Number(saved) as 2 | 3 | 4) : 2
+    const n = Number(saved)
+    return (n >= 2 && n <= 6) ? (n as 2 | 3 | 4 | 5 | 6) : 2
   })
   const [playerNames, setPlayerNames] = useState(() => {
-    if (typeof window === 'undefined') return ['', '', '', '']
+    if (typeof window === 'undefined') return ['', '', '', '', '', '']
     try {
       const saved = localStorage.getItem('km_playerNames')
       if (saved) {
         const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed) && parsed.length === 4) return parsed as string[]
+        if (Array.isArray(parsed)) {
+          // Pad to 6 if needed (migration from old 4-player saves)
+          while (parsed.length < 6) parsed.push('')
+          return parsed.slice(0, 6) as string[]
+        }
       }
     } catch { /* ignore */ }
-    return ['', '', '', '']
+    return ['', '', '', '', '', '']
   })
   const [difficulty, setDifficulty] = useState<0 | 1 | 2 | 3>(() => {
     if (typeof window === 'undefined') return 1
@@ -130,6 +136,10 @@ export default function KaraokeMadnessPage() {
     const saved = localStorage.getItem('km_audioMode')
     return saved === 'full' ? 'full' : 'karaoke'
   })
+  const [superMadness, setSuperMadness] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return localStorage.getItem('km_superMadness') === 'true'
+  })
 
   // Persist setup state to localStorage
   useEffect(() => {
@@ -137,7 +147,13 @@ export default function KaraokeMadnessPage() {
     localStorage.setItem('km_playerNames', JSON.stringify(playerNames))
     localStorage.setItem('km_difficulty', String(difficulty))
     localStorage.setItem('km_audioMode', audioMode)
-  }, [playerCount, playerNames, difficulty, audioMode])
+    localStorage.setItem('km_superMadness', String(superMadness))
+  }, [playerCount, playerNames, difficulty, audioMode, superMadness])
+
+  // Crazy lyrics state
+  const [crazyLyrics, setCrazyLyrics] = useState(false)
+  const [crazyWords, setCrazyWords] = useState<string[][] | null>(null)
+  const [crazyLoading, setCrazyLoading] = useState(false)
 
   // Game state
   const [phase, setPhase] = useState<GamePhase>('setup')
@@ -145,6 +161,9 @@ export default function KaraokeMadnessPage() {
   const [assignment, setAssignment] = useState<PlayerAssignment | null>(null)
   const [currentTimeMs, setCurrentTimeMs] = useState(0)
   const [syncing, setSyncing] = useState(false)
+  const [preparing, setPreparing] = useState(false)
+  const [prepareError, setPrepareError] = useState<string | null>(null)
+  const [gameSeed, setGameSeed] = useState(0)
 
   // Audio
   const audioActionsRef = useRef<AudioActions | null>(null)
@@ -243,8 +262,97 @@ export default function KaraokeMadnessPage() {
     setSyncing(false)
   }
 
+  // Prepare from YouTube: extract audio + auto-sync in one go
+  async function handlePrepareFromYouTube() {
+    setPreparing(true)
+    setPrepareError(null)
+    try {
+      // Step 1: Extract audio from YouTube
+      const extractRes = await fetch(`/api/songs/${songId}/youtube-extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (!extractRes.ok) {
+        const data = await extractRes.json().catch(() => ({ error: 'YouTube extraction failed' }))
+        throw new Error(data.error || 'YouTube extraction failed')
+      }
+      const { tracks } = await extractRes.json()
+
+      // Step 2: Auto-sync lyrics using the first extracted track
+      if (tracks && tracks.length > 0) {
+        const syncRes = await fetch(`/api/songs/${songId}/auto-sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audioTrackId: tracks[0].id }),
+        })
+        if (!syncRes.ok) {
+          // Non-fatal — audio extracted but sync failed
+          console.warn('[km] Auto-sync failed after YouTube extract')
+        }
+      }
+
+      // Step 3: Reload song data
+      const songRes = await fetch(`/api/songs/${songId}`)
+      if (songRes.ok) {
+        const data = await songRes.json()
+        const raw = data.song ?? data
+        setSong({
+          ...raw,
+          chunks: (raw.chunks || []).map((c: any) => ({
+            ...c,
+            lineTimestamps: c.lineTimestamps ? JSON.parse(c.lineTimestamps) : null,
+            wordTimestamps: c.wordTimestamps ? JSON.parse(c.wordTimestamps) : null,
+          })),
+        })
+      }
+    } catch (err) {
+      setPrepareError(err instanceof Error ? err.message : 'Preparation failed')
+    }
+    setPreparing(false)
+  }
+
+  // Generate crazy lyrics via API
+  async function handleGenerateCrazyLyrics() {
+    setCrazyLoading(true)
+    try {
+      const res = await fetch(`/api/songs/${songId}/crazy-lyrics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setCrazyWords(data.crazyLines)
+        setCrazyLyrics(true)
+      }
+    } catch { /* non-critical */ }
+    setCrazyLoading(false)
+  }
+
   // Build chunk infos for verse-by-verse mode and chorus detection
   const chunkInfos = useMemo(() => song ? buildChunkInfos(song.chunks) : [], [song])
+
+  // Song duration for chaos overlay
+  const songDurationMs = useMemo(() => {
+    if (!assignment) return 0
+    const allWords = assignment.lines.flatMap(l => l.words)
+    return allWords.length > 0 ? Math.max(...allWords.map(w => w.endMs)) : 0
+  }, [assignment])
+
+  // Apply crazy words to assignment if enabled
+  const effectiveAssignment = useMemo(() => {
+    if (!assignment || !crazyLyrics || !crazyWords) return assignment
+    // crazyWords is a flat array of lines (same order as mergeAllWordTimestamps)
+    // assignment.lines maps to the same flat lines via lineIndex
+    const newLines = assignment.lines.map((line) => {
+      const crazyLine = crazyWords[line.lineIndex]
+      const newWords = line.words.map((w, wi) => {
+        const replacement = crazyLine?.[wi]
+        return replacement ? { ...w, word: replacement } : w
+      })
+      return { ...line, words: newWords }
+    })
+    return { ...assignment, lines: newLines }
+  }, [assignment, crazyLyrics, crazyWords])
 
   // Start game (or re-generate with a new difficulty)
   function startWithDifficulty(d: 0 | 1 | 2 | 3) {
@@ -257,6 +365,8 @@ export default function KaraokeMadnessPage() {
   }
 
   function handleStart() {
+    const seed = Date.now()
+    setGameSeed(seed)
     startWithDifficulty(difficulty)
     setPhase('countdown')
     setCountdown(3)
@@ -373,6 +483,9 @@ export default function KaraokeMadnessPage() {
           <Card className="!p-4 border-amber-500/30 bg-amber-500/5">
             <p className="text-sm text-foreground font-medium">לשיר הזה אין תזמון מילים</p>
             <p className="text-xs text-text-muted mt-1">יש לסנכרן מילים לפני שאפשר לשחק</p>
+            {prepareError && (
+              <p className="text-xs text-danger mt-2">{prepareError}</p>
+            )}
             {song.audioTracks && song.audioTracks.length > 0 ? (
               <Button
                 variant="primary"
@@ -382,6 +495,16 @@ export default function KaraokeMadnessPage() {
                 onClick={handleAutoSync}
               >
                 סנכרן אוטומטית
+              </Button>
+            ) : song.youtubeVideoId ? (
+              <Button
+                variant="primary"
+                size="sm"
+                className="mt-3"
+                loading={preparing}
+                onClick={handlePrepareFromYouTube}
+              >
+                {preparing ? 'מכין מיוטיוב...' : 'הכן מיוטיוב'}
               </Button>
             ) : (
               <p className="text-xs text-text-muted mt-2">אין קובץ שמע — יש להעלות שמע ואז לסנכרן</p>
@@ -393,7 +516,7 @@ export default function KaraokeMadnessPage() {
         <Card className="!p-4 space-y-3">
           <label className="block text-sm font-medium text-foreground">מספר שחקנים</label>
           <div className="flex gap-2">
-            {([2, 3, 4] as const).map((n) => (
+            {([2, 3, 4, 5, 6] as const).map((n) => (
               <button
                 key={n}
                 type="button"
@@ -498,6 +621,85 @@ export default function KaraokeMadnessPage() {
           </div>
         </Card>
 
+        {/* Crazy Lyrics */}
+        {hasSyncedWords && (
+          <Card className="!p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="block text-sm font-medium text-foreground">
+                  {'\u05DE\u05D9\u05DC\u05D9\u05DD \u05DE\u05D8\u05D5\u05E8\u05E4\u05D5\u05EA'}
+                </label>
+                <p className="text-xs text-text-muted mt-0.5">
+                  {'\u05DE\u05D9\u05DC\u05D9\u05DD \u05D0\u05D1\u05E1\u05D5\u05E8\u05D3\u05D9\u05D5\u05EA \u05E9\u05E0\u05D5\u05E6\u05E8\u05D5 \u05E2\u05DC \u05D9\u05D3\u05D9 AI'}
+                </p>
+              </div>
+              {crazyWords ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCrazyLyrics(!crazyLyrics)}
+                    className={[
+                      'relative inline-flex h-7 w-12 items-center rounded-full transition-colors',
+                      crazyLyrics ? 'bg-amber-500' : 'bg-border',
+                    ].join(' ')}
+                  >
+                    <span
+                      className={[
+                        'inline-block h-5 w-5 rounded-full bg-white transition-transform shadow-sm',
+                        crazyLyrics ? 'translate-x-6' : 'translate-x-1',
+                      ].join(' ')}
+                    />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={crazyLoading}
+                  onClick={handleGenerateCrazyLyrics}
+                  className="rounded-lg bg-amber-500/20 border border-amber-500/30 px-3 py-1.5 text-xs font-medium text-amber-400 hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+                >
+                  {crazyLoading ? '\u05D9\u05D5\u05E6\u05E8...' : '\u05E6\u05D5\u05E8!'}
+                </button>
+              )}
+            </div>
+            {crazyWords && (
+              <button
+                type="button"
+                disabled={crazyLoading}
+                onClick={handleGenerateCrazyLyrics}
+                className="text-xs text-amber-400/60 hover:text-amber-400 transition-colors disabled:opacity-50"
+              >
+                {crazyLoading ? '\u05D9\u05D5\u05E6\u05E8...' : '\u05E6\u05D5\u05E8 \u05DE\u05D7\u05D3\u05E9'}
+              </button>
+            )}
+          </Card>
+        )}
+
+        {/* Super Madness toggle */}
+        <Card className="!p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="block text-sm font-medium text-foreground">{'\u05E1\u05D5\u05E4\u05E8 \u05DE\u05D8\u05D5\u05E8\u05E3'}</label>
+              <p className="text-xs text-text-muted mt-0.5">{'\u05D4\u05E4\u05E8\u05E2\u05D5\u05EA \u05D5\u05D9\u05D6\u05D5\u05D0\u05DC\u05D9\u05D5\u05EA \u05DE\u05D8\u05D5\u05E8\u05E4\u05D5\u05EA \u05D1\u05DE\u05D4\u05DC\u05DA \u05D4\u05DE\u05E9\u05D7\u05E7'}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSuperMadness(!superMadness)}
+              className={[
+                'relative inline-flex h-7 w-12 items-center rounded-full transition-colors',
+                superMadness ? 'bg-purple-500' : 'bg-border',
+              ].join(' ')}
+            >
+              <span
+                className={[
+                  'inline-block h-5 w-5 rounded-full bg-white transition-transform shadow-sm',
+                  superMadness ? 'translate-x-6' : 'translate-x-1',
+                ].join(' ')}
+              />
+            </button>
+          </div>
+        </Card>
+
         {/* Start button */}
         <Button
           variant="primary"
@@ -506,7 +708,7 @@ export default function KaraokeMadnessPage() {
           disabled={!hasSyncedWords}
           onClick={handleStart}
         >
-          התחילו!
+          {'\u05D4\u05EA\u05D7\u05D9\u05DC\u05D5!'}
         </Button>
       </div>
     )
@@ -639,7 +841,7 @@ export default function KaraokeMadnessPage() {
         {/* Lyrics — center of screen, scrollable */}
         <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6">
           <KaraokeMadnessDisplay
-            lines={assignment.lines}
+            lines={(effectiveAssignment ?? assignment).lines}
             playerNames={effectiveNames}
             currentTimeMs={currentTimeMs}
             language={song.language}
@@ -651,6 +853,14 @@ export default function KaraokeMadnessPage() {
             }}
           />
         </div>
+
+        {/* Super Madness chaos overlay */}
+        <ChaosOverlay
+          enabled={superMadness}
+          seed={gameSeed}
+          songDurationMs={songDurationMs}
+          currentTimeMs={currentTimeMs}
+        />
 
         {/* Bottom bar: difficulty switch */}
         <div className="shrink-0 px-4 py-3 bg-black/80 backdrop-blur-sm border-t border-white/10 flex gap-2">

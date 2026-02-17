@@ -133,11 +133,6 @@ export default function KaraokeMadnessDisplay({
                   const adjustedEnd = Math.max(0, word.endMs - latencyOffsetMs)
                   const isCurrentWord = isActiveLine && wordIdx === activeWordIdx
                   const isWordPast = currentTimeMs >= adjustedEnd
-                  const isWordUpcoming = currentTimeMs < adjustedStart &&
-                    adjustedStart - currentTimeMs < 3000
-                  const isNextWord = isActiveLine && activeWordIdx >= 0 &&
-                    wordIdx > activeWordIdx && wordIdx <= activeWordIdx + 2 &&
-                    !isWordPast
 
                   const color = getColor(word.player)
 
@@ -162,17 +157,11 @@ export default function KaraokeMadnessDisplay({
                       )}
                       <span
                         className={[
-                          'transition-all',
-                          isCurrentWord ? 'duration-100' : 'duration-300',
                           isCurrentWord
-                            ? `${color.text} font-black`
+                            ? `${color.text} font-black transition-all duration-100`
                             : isWordPast
                               ? `${color.text} opacity-40`
-                              : isNextWord
-                                ? `${color.text} opacity-80`
-                                : isWordUpcoming
-                                  ? `${color.text} opacity-60`
-                                  : `${color.text} opacity-30`,
+                              : `${color.text} opacity-30`,
                         ].join(' ')}
                         style={isCurrentWord ? {
                           textShadow: `0 0 30px ${color.hex}80, 0 0 60px ${color.hex}30`,

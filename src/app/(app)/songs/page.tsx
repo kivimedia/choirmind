@@ -13,6 +13,7 @@ import ProgressBar from '@/components/ui/ProgressBar'
 import EmptyState from '@/components/ui/EmptyState'
 import Modal from '@/components/ui/Modal'
 import { useChoirStore } from '@/stores/useChoirStore'
+import { useProcessingStatus } from '@/hooks/useProcessingStatus'
 
 interface AudioTrackSummary {
   id: string
@@ -36,6 +37,7 @@ interface Song {
   allSynced: boolean
   hasUnsynced: boolean
   stemsCount?: number
+  processingStatus?: string | null
 }
 
 export default function SongsPage() {
@@ -85,6 +87,29 @@ export default function SongsPage() {
   const [bulkSyncQueue, setBulkSyncQueue] = useState<Song[]>([])
   const [bulkSyncIndex, setBulkSyncIndex] = useState(0)
   const [bulkSyncResults, setBulkSyncResults] = useState<{ songId: string; title: string; success: boolean; error?: string }[]>([])
+
+  // Poll processing status for songs that are PENDING or PROCESSING
+  const processingSongIds = useMemo(
+    () => songs.filter(s => s.processingStatus === 'PENDING' || s.processingStatus === 'PROCESSING').map(s => s.id),
+    [songs]
+  )
+  const processingStatuses = useProcessingStatus(processingSongIds)
+
+  // When a polled status changes to READY, refresh the song list
+  useEffect(() => {
+    for (const [id, status] of processingStatuses) {
+      if (status.status === 'READY') {
+        // Update local state
+        setSongs(prev => prev.map(s =>
+          s.id === id ? { ...s, processingStatus: 'READY' } : s
+        ))
+      } else if (status.status === 'FAILED') {
+        setSongs(prev => prev.map(s =>
+          s.id === id ? { ...s, processingStatus: 'FAILED' } : s
+        ))
+      }
+    }
+  }, [processingStatuses])
 
   const fetchSongs = useCallback(async (archived: boolean) => {
     try {
@@ -923,6 +948,54 @@ export default function SongsPage() {
                     </span>
                   )}
                 </div>
+
+                {/* Processing status indicator */}
+                {(() => {
+                  const ps = processingStatuses.get(song.id)
+                  const status = ps?.status || song.processingStatus
+                  if (status === 'PENDING') {
+                    return (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-text-muted animate-pulse">
+                        <div className="h-2 w-2 rounded-full bg-amber-400" />
+                        <span>בהמתנה...</span>
+                      </div>
+                    )
+                  }
+                  if (status === 'PROCESSING') {
+                    const stage = ps?.stage
+                    const stageLabel = stage === 'downloading' ? 'מוריד...'
+                      : stage === 'separating' ? 'מפריד קולות...'
+                      : stage === 'syncing' ? 'מסנכרן מילים...'
+                      : 'מעבד...'
+                    return (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-primary">
+                        <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                        <span>{stageLabel}</span>
+                      </div>
+                    )
+                  }
+                  if (status === 'FAILED') {
+                    return (
+                      <div className="mt-2 flex items-center gap-2 text-xs">
+                        <span className="rounded-full bg-danger/10 px-2 py-0.5 text-danger font-medium">נכשל</span>
+                        <button
+                          type="button"
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            await fetch(`/api/songs/${song.id}/retry`, { method: 'POST' })
+                            setSongs(prev => prev.map(s =>
+                              s.id === song.id ? { ...s, processingStatus: 'PENDING' } : s
+                            ))
+                          }}
+                          className="text-primary hover:underline font-medium"
+                        >
+                          נסה שוב
+                        </button>
+                      </div>
+                    )
+                  }
+                  return null
+                })()}
 
                 {!showArchived && (
                   <div className="mt-2">

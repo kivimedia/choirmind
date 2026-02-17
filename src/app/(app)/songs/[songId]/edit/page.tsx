@@ -287,6 +287,10 @@ export default function EditSongPage() {
   const [autoSyncError, setAutoSyncError] = useState<string | null>(null)
   const [autoSyncDone, setAutoSyncDone] = useState(false)
 
+  // YouTube extract state
+  const [ytExtracting, setYtExtracting] = useState(false)
+  const [ytExtractError, setYtExtractError] = useState<string | null>(null)
+
   // Lyrics search state
   const [lyricsSearchOpen, setLyricsSearchOpen] = useState(false)
   const [lyricsSearching, setLyricsSearching] = useState(false)
@@ -493,6 +497,29 @@ export default function EditSongPage() {
       setAutoSyncError(err instanceof Error ? err.message : 'Auto-sync failed')
     } finally {
       setAutoSyncing(false)
+    }
+  }
+
+  async function handleYoutubeExtract() {
+    setYtExtracting(true)
+    setYtExtractError(null)
+    try {
+      const res = await fetch(`/api/songs/${songId}/youtube-extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'YouTube extraction failed' }))
+        throw new Error(data.error || 'YouTube extraction failed')
+      }
+      const { tracks } = await res.json()
+      if (tracks && tracks.length > 0) {
+        setAudioTracks((prev) => [...prev, ...tracks])
+      }
+    } catch (err: unknown) {
+      setYtExtractError(err instanceof Error ? err.message : 'YouTube extraction failed')
+    } finally {
+      setYtExtracting(false)
     }
   }
 
@@ -954,7 +981,23 @@ export default function EditSongPage() {
       </div>
 
       {/* Audio Tracks */}
-      <Card className="!p-6">
+      <Card className="!p-6 space-y-4">
+        {youtubeVideoId && audioTracks.length === 0 && (
+          <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2">
+            <p className="text-sm font-medium text-foreground">יש לשיר סרטון YouTube — ניתן לחלץ שמע ממנו</p>
+            {ytExtractError && (
+              <p className="text-xs text-danger">{ytExtractError}</p>
+            )}
+            <Button
+              variant="primary"
+              size="sm"
+              loading={ytExtracting}
+              onClick={handleYoutubeExtract}
+            >
+              {ytExtracting ? 'מחלץ שמע מיוטיוב...' : 'חלץ שמע מיוטיוב'}
+            </Button>
+          </div>
+        )}
         <AudioUploadPanel
           songId={songId}
           existingTracks={audioTracks}

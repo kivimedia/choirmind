@@ -425,7 +425,7 @@ function assignLevel3(
  */
 export function generateAssignments(
   wordTimestamps: WordTimestamp[][],
-  playerCount: 2 | 3 | 4,
+  playerCount: 2 | 3 | 4 | 5 | 6,
   difficulty: 0 | 1 | 2 | 3,
   seed: number = Date.now(),
   chunkInfos?: ChunkInfo[],
@@ -468,6 +468,8 @@ export const PLAYER_COLORS = [
   { bg: 'bg-rose-500', text: 'text-rose-500', glow: 'shadow-rose-500/50', hex: '#f43f5e' },
   { bg: 'bg-emerald-500', text: 'text-emerald-500', glow: 'shadow-emerald-500/50', hex: '#10b981' },
   { bg: 'bg-amber-500', text: 'text-amber-500', glow: 'shadow-amber-500/50', hex: '#f59e0b' },
+  { bg: 'bg-purple-500', text: 'text-purple-500', glow: 'shadow-purple-500/50', hex: '#a855f7' },
+  { bg: 'bg-cyan-500', text: 'text-cyan-500', glow: 'shadow-cyan-500/50', hex: '#06b6d4' },
 ] as const
 
 /**

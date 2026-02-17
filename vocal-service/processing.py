@@ -114,6 +114,17 @@ def isolate_vocals(
     return vocal_path, accompaniment_path
 
 
+def isolate_vocals_fast(
+    audio_path: str,
+    output_dir: str,
+) -> tuple[str, str]:
+    """Fast stem separation using htdemucs (not htdemucs_ft).
+
+    ~2-3x faster, good enough for karaoke/practice playback.
+    """
+    return isolate_vocals(audio_path, output_dir, model="htdemucs")
+
+
 # ---------------------------------------------------------------------------
 # Feature extraction
 # ---------------------------------------------------------------------------

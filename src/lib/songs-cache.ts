@@ -16,6 +16,7 @@ type CachedSong = {
   allSynced: boolean
   hasUnsynced: boolean
   stemsCount: number
+  processingStatus: string | null
 }
 
 async function fetchSongs(
@@ -87,6 +88,7 @@ async function fetchSongs(
     allSynced: song.chunks.length > 0 && song.chunks.every((c) => c.lineTimestamps),
     hasUnsynced: song.chunks.some((c) => c.lyrics?.trim() && !c.lineTimestamps),
     stemsCount: stemMap.get(song.id) ?? 0,
+    processingStatus: song.processingStatus,
   }))
 }
 

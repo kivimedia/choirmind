@@ -54,44 +54,96 @@ export async function POST(request: NextRequest) {
       ? splitLyricsToChunks(lyrics)
       : [{ label: 'שיר מלא', chunkType: 'verse', order: 0, lyrics: '(טקסט יתווסף מאוחר יותר)' }]
 
-    // ── Step 1: Extract audio from YouTube ───────────────────────────
-    console.log(`[youtube-import] Extracting audio from: ${youtubeUrl}`)
-    const extractRes = await fetch(`${vocalServiceUrl}/api/v1/youtube-extract`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ youtube_url: youtubeUrl }),
-      signal: AbortSignal.timeout(200000), // 3+ min for proxy download
-    })
-
-    if (!extractRes.ok) {
-      const err = await extractRes.json().catch(() => ({ detail: 'Failed to extract audio' }))
-      return NextResponse.json({ error: err.detail || 'YouTube audio extraction failed' }, { status: 502 })
-    }
-
-    const extractData = await extractRes.json()
-    const { audio_s3_key, audio_url, duration_ms } = extractData
-    console.log(`[youtube-import] Audio extracted: ${audio_s3_key} (${duration_ms}ms)`)
-
-    // ── Step 2: Separate stems ───────────────────────────────────────
+    // ── Check ProcessedVideo cache ────────────────────────────────────
+    let audio_s3_key = ''
+    let audio_url = ''
+    let duration_ms = 0
     let accompanimentUrl: string | null = null
-    try {
-      console.log(`[youtube-import] Separating stems...`)
-      const separateRes = await fetch(`${vocalServiceUrl}/api/v1/separate-stems`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ s3_key: audio_s3_key }),
-        signal: AbortSignal.timeout(300000),
+    let cachedWordTimestamps: string | null = null
+    let cacheHit = false
+
+    if (videoId) {
+      const cached = await prisma.processedVideo.findUnique({
+        where: { youtubeVideoId: videoId },
       })
 
-      if (separateRes.ok) {
-        const separateData = await separateRes.json()
-        accompanimentUrl = separateData.accompaniment_url
-        console.log(`[youtube-import] Stems separated`)
-      } else {
-        console.warn(`[youtube-import] Stem separation failed, continuing with full audio only`)
+      if (cached) {
+        console.log(`[youtube-import] Cache HIT for video ${videoId}`)
+        cacheHit = true
+        audio_s3_key = cached.fullAudioS3Key
+        audio_url = cached.fullAudioUrl
+        duration_ms = cached.durationMs ?? 0
+        accompanimentUrl = cached.accompanimentUrl
+        cachedWordTimestamps = cached.wordTimestamps
+        // Increment usage count
+        await prisma.processedVideo.update({
+          where: { id: cached.id },
+          data: { usageCount: { increment: 1 } },
+        })
       }
-    } catch {
-      console.warn(`[youtube-import] Stem separation error`)
+    }
+
+    if (!cacheHit) {
+      // ── Step 1: Extract audio from YouTube ───────────────────────────
+      console.log(`[youtube-import] Cache MISS — extracting audio from: ${youtubeUrl}`)
+      const extractRes = await fetch(`${vocalServiceUrl}/api/v1/youtube-extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ youtube_url: youtubeUrl }),
+        signal: AbortSignal.timeout(200000), // 3+ min for proxy download
+      })
+
+      if (!extractRes.ok) {
+        const err = await extractRes.json().catch(() => ({ detail: 'Failed to extract audio' }))
+        return NextResponse.json({ error: err.detail || 'YouTube audio extraction failed' }, { status: 502 })
+      }
+
+      const extractData = await extractRes.json()
+      audio_s3_key = extractData.audio_s3_key
+      audio_url = extractData.audio_url
+      duration_ms = extractData.duration_ms
+      console.log(`[youtube-import] Audio extracted: ${audio_s3_key} (${duration_ms}ms)`)
+
+      // ── Step 2: Separate stems ───────────────────────────────────────
+      try {
+        console.log(`[youtube-import] Separating stems...`)
+        const separateRes = await fetch(`${vocalServiceUrl}/api/v1/separate-stems`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ s3_key: audio_s3_key }),
+          signal: AbortSignal.timeout(300000),
+        })
+
+        if (separateRes.ok) {
+          const separateData = await separateRes.json()
+          accompanimentUrl = separateData.accompaniment_url
+          console.log(`[youtube-import] Stems separated`)
+        } else {
+          console.warn(`[youtube-import] Stem separation failed, continuing with full audio only`)
+        }
+      } catch {
+        console.warn(`[youtube-import] Stem separation error`)
+      }
+
+      // ── Cache the result ─────────────────────────────────────────────
+      if (videoId) {
+        try {
+          await prisma.processedVideo.create({
+            data: {
+              youtubeVideoId: videoId,
+              title,
+              durationMs: duration_ms,
+              fullAudioUrl: audio_url,
+              fullAudioS3Key: audio_s3_key,
+              accompanimentUrl,
+            },
+          })
+          console.log(`[youtube-import] Cached ProcessedVideo for ${videoId}`)
+        } catch (e) {
+          // Ignore duplicate key errors (race condition)
+          console.warn(`[youtube-import] Failed to cache ProcessedVideo:`, e)
+        }
+      }
     }
 
     // ── Step 3: Create song + audio tracks ───────────────────────────
@@ -104,6 +156,8 @@ export async function POST(request: NextRequest) {
         personalUserId: !choirId ? userId : null,
         youtubeVideoId: videoId,
         source: 'youtube',
+        processingStatus: cacheHit ? 'READY' : 'PROCESSING',
+        processingStage: cacheHit ? null : 'downloading',
         chunks: { create: chunkData },
       },
       include: { chunks: true },
@@ -139,9 +193,33 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // ── Step 4: Auto-sync lyrics if available ────────────────────────
+    // ── Step 4: Auto-sync lyrics ─────────────────────────────────────
+    // If we have cached word timestamps, apply them directly to chunks
     let syncResult = null
-    if (lyrics && lyrics.trim()) {
+    if (cacheHit && cachedWordTimestamps && lyrics && lyrics.trim()) {
+      try {
+        const parsedTimestamps = JSON.parse(cachedWordTimestamps)
+        // Apply cached timestamps to chunks
+        let lineOffset = 0
+        for (const chunk of song.chunks) {
+          const chunkLines = chunk.lyrics.split('\n').filter((l: string) => l.trim())
+          const chunkTimestamps = parsedTimestamps.slice(lineOffset, lineOffset + chunkLines.length)
+          if (chunkTimestamps.length > 0) {
+            await prisma.chunk.update({
+              where: { id: chunk.id },
+              data: { wordTimestamps: JSON.stringify(chunkTimestamps) },
+            })
+          }
+          lineOffset += chunkLines.length
+        }
+        console.log(`[youtube-import] Applied cached word timestamps`)
+        syncResult = { cached: true }
+      } catch {
+        console.warn(`[youtube-import] Failed to apply cached timestamps, falling back to auto-sync`)
+      }
+    }
+
+    if (!syncResult && lyrics && lyrics.trim()) {
       try {
         const baseUrl = process.env.NEXTAUTH_URL || ''
         const syncRes = await fetch(`${baseUrl}/api/songs/${song.id}/auto-sync`, {
@@ -155,11 +233,41 @@ export async function POST(request: NextRequest) {
         if (syncRes.ok) {
           syncResult = await syncRes.json()
           console.log(`[youtube-import] Auto-sync completed`)
+
+          // Update cache with word timestamps if we have a videoId
+          if (videoId && syncResult) {
+            try {
+              // Fetch updated chunks to get timestamps
+              const updatedSong = await prisma.song.findUnique({
+                where: { id: song.id },
+                include: { chunks: { orderBy: { order: 'asc' } } },
+              })
+              if (updatedSong) {
+                const allTimestamps = updatedSong.chunks
+                  .filter(c => c.wordTimestamps)
+                  .flatMap(c => JSON.parse(c.wordTimestamps!))
+                if (allTimestamps.length > 0) {
+                  await prisma.processedVideo.update({
+                    where: { youtubeVideoId: videoId },
+                    data: { wordTimestamps: JSON.stringify(allTimestamps) },
+                  })
+                }
+              }
+            } catch {
+              // Non-critical
+            }
+          }
         }
       } catch {
         console.warn(`[youtube-import] Auto-sync failed, continuing without sync`)
       }
     }
+
+    // Mark processing as complete
+    await prisma.song.update({
+      where: { id: song.id },
+      data: { processingStatus: 'READY', processingStage: null, processingError: null },
+    })
 
     invalidateSongsCache()
 
@@ -170,6 +278,7 @@ export async function POST(request: NextRequest) {
       },
       audioImported: true,
       syncResult,
+      cacheHit,
     })
   } catch (error) {
     console.error('POST /api/songs/youtube-import error:', error)
