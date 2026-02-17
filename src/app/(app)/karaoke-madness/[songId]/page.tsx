@@ -232,15 +232,19 @@ export default function KaraokeMadnessPage() {
   }, [])
 
   // Auto-sync handler
+  const [syncError, setSyncError] = useState<string | null>(null)
+
   async function handleAutoSync() {
     if (!song?.audioTracks?.length) return
     setSyncing(true)
+    setSyncError(null)
     try {
       const trackId = song.audioTracks[0].id
       const res = await fetch(`/api/songs/${songId}/auto-sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audioTrackId: trackId }),
+        signal: AbortSignal.timeout(120000),
       })
       if (res.ok) {
         // Reload song to get new timestamps
@@ -257,8 +261,15 @@ export default function KaraokeMadnessPage() {
             })),
           })
         }
+      } else {
+        const errData = await res.json().catch(() => ({ error: 'סנכרון נכשל' }))
+        setSyncError(errData.error || `סנכרון נכשל (${res.status})`)
       }
-    } catch { /* non-critical */ }
+    } catch (err) {
+      setSyncError(err instanceof Error && err.name === 'TimeoutError'
+        ? 'הסנכרון לקח יותר מדי זמן — נסה שוב'
+        : 'סנכרון נכשל — נסה שוב')
+    }
     setSyncing(false)
   }
 
@@ -483,8 +494,8 @@ export default function KaraokeMadnessPage() {
           <Card className="!p-4 border-amber-500/30 bg-amber-500/5">
             <p className="text-sm text-foreground font-medium">לשיר הזה אין תזמון מילים</p>
             <p className="text-xs text-text-muted mt-1">יש לסנכרן מילים לפני שאפשר לשחק</p>
-            {prepareError && (
-              <p className="text-xs text-danger mt-2">{prepareError}</p>
+            {(prepareError || syncError) && (
+              <p className="text-xs text-danger mt-2">{prepareError || syncError}</p>
             )}
             {song.audioTracks && song.audioTracks.length > 0 ? (
               <Button
@@ -494,7 +505,7 @@ export default function KaraokeMadnessPage() {
                 loading={syncing}
                 onClick={handleAutoSync}
               >
-                סנכרן אוטומטית
+                {syncing ? 'מסנכרן...' : syncError ? 'נסה שוב' : 'סנכרן אוטומטית'}
               </Button>
             ) : song.youtubeVideoId ? (
               <Button
