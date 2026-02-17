@@ -2,7 +2,10 @@
 
 import { useMemo, useEffect, useRef } from 'react'
 import type { AssignedLine } from '@/lib/karaoke-madness'
-import { PLAYER_COLORS } from '@/lib/karaoke-madness'
+import { PLAYER_COLORS, EVERYONE } from '@/lib/karaoke-madness'
+
+/** Color used for EVERYONE (-1) lines — a white/gold "all together" style. */
+const EVERYONE_COLOR = { bg: 'bg-white', text: 'text-yellow-300', glow: '', hex: '#fbbf24' }
 
 interface KaraokeMadnessDisplayProps {
   /** Assigned lines with player-colored words. */
@@ -11,19 +14,28 @@ interface KaraokeMadnessDisplayProps {
   playerNames: string[]
   /** Current playback time in ms. */
   currentTimeMs: number
+  /** Song language — determines text direction. */
+  language?: string
   /** Latency offset in ms subtracted from word timestamps. */
   latencyOffsetMs?: number
 }
 
 const DEFAULT_LATENCY_OFFSET_MS = 500
 
+function getColor(player: number) {
+  if (player === EVERYONE) return EVERYONE_COLOR
+  return PLAYER_COLORS[player] || PLAYER_COLORS[0]
+}
+
 export default function KaraokeMadnessDisplay({
   lines,
   playerNames,
   currentTimeMs,
+  language = 'he',
   latencyOffsetMs = DEFAULT_LATENCY_OFFSET_MS,
 }: KaraokeMadnessDisplayProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const isRTL = language === 'he'
 
   // Find the currently active word across all lines
   const { activeLineIdx, activeWordIdx } = useMemo(() => {
@@ -62,13 +74,13 @@ export default function KaraokeMadnessDisplay({
   }, [activeLineIdx])
 
   // Active player's color for the line background highlight
-  const activeLineColor = activePlayer >= 0 ? PLAYER_COLORS[activePlayer] : null
+  const activeLineColor = getColor(activePlayer)
 
   return (
     <div
       ref={containerRef}
-      dir="rtl"
-      className="text-start"
+      dir={isRTL ? 'rtl' : 'ltr'}
+      className={isRTL ? 'text-right' : 'text-left'}
       style={{ fontSize: 'clamp(18px, 5vw, 26px)', lineHeight: 2.0 }}
     >
       {lines.map((line, lineIdx) => {
@@ -78,8 +90,31 @@ export default function KaraokeMadnessDisplay({
         const isUpcomingLine = !isPast && !isActiveLine &&
           lineIdx <= activeLineIdx + 2 && activeLineIdx >= 0
 
+        // Determine the dominant player for this line (for the label)
+        const linePlayer = line.words.length > 0 ? line.words[0].player : -1
+        const isEveryoneLine = linePlayer === EVERYONE
+        const lineColor = getColor(linePlayer)
+        const linePlayerName = isEveryoneLine
+          ? '\u{1F3A4} כולם!'
+          : linePlayer >= 0
+            ? playerNames[linePlayer]
+            : ''
+
+        // Border side depends on text direction
+        const borderStyle = isActiveLine && activePlayer !== -1
+          ? {
+              backgroundColor: `${activeLineColor.hex}08`,
+              [isRTL ? 'borderRight' : 'borderLeft']: `3px solid ${activeLineColor.hex}40`,
+            }
+          : isActiveLine && isEveryoneLine
+            ? {
+                backgroundColor: `${EVERYONE_COLOR.hex}10`,
+                [isRTL ? 'borderRight' : 'borderLeft']: `3px solid ${EVERYONE_COLOR.hex}50`,
+              }
+            : undefined
+
         return (
-          <p
+          <div
             key={lineIdx}
             className={[
               'mb-2 min-h-[2em] rounded-lg px-2 py-0.5 transition-all duration-500',
@@ -87,58 +122,82 @@ export default function KaraokeMadnessDisplay({
               isUpcomingLine ? 'opacity-70' : '',
               !isPast && !isActiveLine && !isUpcomingLine && activeLineIdx >= 0 ? 'opacity-40' : '',
             ].join(' ')}
-            style={isActiveLine && activeLineColor ? {
-              backgroundColor: `${activeLineColor.hex}08`,
-              borderRight: `3px solid ${activeLineColor.hex}40`,
-            } : undefined}
+            style={borderStyle}
           >
             {line.words.length === 0 ? (
               <span>&nbsp;</span>
             ) : (
-              line.words.map((word, wordIdx) => {
-                const adjustedStart = Math.max(0, word.startMs - latencyOffsetMs)
-                const adjustedEnd = Math.max(0, word.endMs - latencyOffsetMs)
-                const isCurrentWord = isActiveLine && wordIdx === activeWordIdx
-                const isWordPast = currentTimeMs >= adjustedEnd
-                const isWordUpcoming = currentTimeMs < adjustedStart &&
-                  adjustedStart - currentTimeMs < 3000 // preview 3s ahead
-                // Next word indicator (1-2 words ahead on active line)
-                const isNextWord = isActiveLine && activeWordIdx >= 0 &&
-                  wordIdx > activeWordIdx && wordIdx <= activeWordIdx + 2 &&
-                  !isWordPast
-
-                const color = PLAYER_COLORS[word.player] || PLAYER_COLORS[0]
-
-                return (
+              <>
+                {/* Player name label at start of line */}
+                {(linePlayer >= 0 || isEveryoneLine) && (
                   <span
-                    key={wordIdx}
-                    className={[
-                      'inline-block transition-all',
-                      isCurrentWord ? 'duration-100' : 'duration-300',
-                      isCurrentWord
-                        ? `${color.text} font-bold`
-                        : isWordPast
-                          ? `${color.text} opacity-50`
-                          : isNextWord
-                            ? `${color.text} opacity-90`
-                            : isWordUpcoming
-                              ? `${color.text} opacity-70`
-                              : `${color.text} opacity-40`,
-                    ].join(' ')}
-                    style={isCurrentWord ? {
-                      textShadow: `0 0 20px ${color.hex}60, 0 0 40px ${color.hex}25`,
-                      transform: 'scale(1.12)',
-                    } : isNextWord ? {
-                      textShadow: `0 0 8px ${color.hex}20`,
-                    } : undefined}
+                    className={`${lineColor.text} text-xs font-bold opacity-60 align-middle`}
+                    style={{ fontSize: '0.55em', marginInlineEnd: '0.5em' }}
                   >
-                    {word.word}
-                    {wordIdx < line.words.length - 1 ? ' ' : ''}
+                    {linePlayerName}
                   </span>
-                )
-              })
+                )}
+                {line.words.map((word, wordIdx) => {
+                  const adjustedStart = Math.max(0, word.startMs - latencyOffsetMs)
+                  const adjustedEnd = Math.max(0, word.endMs - latencyOffsetMs)
+                  const isCurrentWord = isActiveLine && wordIdx === activeWordIdx
+                  const isWordPast = currentTimeMs >= adjustedEnd
+                  const isWordUpcoming = currentTimeMs < adjustedStart &&
+                    adjustedStart - currentTimeMs < 3000 // preview 3s ahead
+                  // Next word indicator (1-2 words ahead on active line)
+                  const isNextWord = isActiveLine && activeWordIdx >= 0 &&
+                    wordIdx > activeWordIdx && wordIdx <= activeWordIdx + 2 &&
+                    !isWordPast
+
+                  const isWordEveryone = word.player === EVERYONE
+                  const color = getColor(word.player)
+
+                  // Show inline player-switch indicator when player changes mid-line
+                  const prevPlayer = wordIdx > 0 ? line.words[wordIdx - 1].player : linePlayer
+                  const playerChanged = word.player !== prevPlayer && wordIdx > 0
+                  const switchColor = getColor(word.player)
+                  const switchName = isWordEveryone
+                    ? '\u{1F3A4}'
+                    : playerNames[word.player] ?? ''
+
+                  return (
+                    <span key={wordIdx}>
+                      {playerChanged && (
+                        <span
+                          className={`${switchColor.text} text-xs font-bold opacity-60 align-middle`}
+                          style={{ fontSize: '0.5em', marginInline: '0.3em' }}
+                        >
+                          {switchName}
+                        </span>
+                      )}
+                      <span
+                        className={[
+                          'transition-all',
+                          isCurrentWord ? 'duration-100' : 'duration-300',
+                          isCurrentWord
+                            ? `${color.text} font-bold`
+                            : isWordPast
+                              ? `${color.text} opacity-50`
+                              : isNextWord
+                                ? `${color.text} opacity-90`
+                                : isWordUpcoming
+                                  ? `${color.text} opacity-70`
+                                  : `${color.text} opacity-40`,
+                        ].join(' ')}
+                        style={isCurrentWord ? {
+                          textShadow: `0 0 20px ${color.hex}60, 0 0 40px ${color.hex}25`,
+                          display: 'inline',
+                        } : undefined}
+                      >
+                        {word.word}
+                      </span>
+                      {wordIdx < line.words.length - 1 ? ' ' : ''}
+                    </span>
+                  )
+                })}
+              </>
             )}
-          </p>
+          </div>
         )
       })}
     </div>

@@ -1,11 +1,16 @@
 /**
  * Karaoke Madness — multiplayer song assignment algorithm.
  *
- * Assigns lyrics segments to 2-4 players at three difficulty levels:
+ * Assigns lyrics segments to 2-4 players at four difficulty levels:
+ *   Level 0: Verse by Verse (super easy)
  *   Level 1: Line by Line
  *   Level 2: Phrase Chunks (2-3 word phrases)
  *   Level 3: Word by Word
+ *
+ * Special player value: EVERYONE (-1) means all players sing together.
  */
+
+export const EVERYONE = -1
 
 export interface WordTimestamp {
   word: string
@@ -17,7 +22,7 @@ export interface AssignedWord {
   word: string
   startMs: number
   endMs: number
-  player: number // 0-indexed player number
+  player: number // 0-indexed player number, or EVERYONE (-1)
 }
 
 export interface AssignedLine {
@@ -28,7 +33,13 @@ export interface AssignedLine {
 export interface PlayerAssignment {
   lines: AssignedLine[]
   playerCount: number
-  difficulty: 1 | 2 | 3
+  difficulty: 0 | 1 | 2 | 3
+}
+
+/** Info about each chunk so verse-by-verse can assign per chunk. */
+export interface ChunkInfo {
+  lineCount: number  // number of non-empty lines in this chunk
+  chunkType: string  // 'verse', 'chorus', 'bridge', etc.
 }
 
 // Seeded PRNG (mulberry32)
@@ -109,6 +120,98 @@ function pickBalancedPlayer(
   }
 
   return candidates[Math.floor(rand() * candidates.length)]
+}
+
+/**
+ * Level 0: Assign entire chunks (verses) to players.
+ * Choruses are assigned to EVERYONE.
+ */
+function assignLevel0(
+  wordTimestamps: WordTimestamp[][],
+  playerCount: number,
+  rand: () => number,
+  chunkInfos?: ChunkInfo[],
+): AssignedLine[] {
+  const result: AssignedLine[] = []
+
+  if (!chunkInfos || chunkInfos.length === 0) {
+    // Fallback: treat as level 1 if no chunk info
+    return assignLevel1(wordTimestamps, playerCount, rand)
+  }
+
+  const durations = new Array(playerCount).fill(0)
+  let lastPlayer = -1
+  let lineIdx = 0
+
+  for (const chunk of chunkInfos) {
+    const isChorus = chunk.chunkType === 'chorus'
+    // Assign entire chunk to one player (or EVERYONE for chorus)
+    const player = isChorus
+      ? EVERYONE
+      : pickBalancedPlayer(durations, lastPlayer, 1, 1, rand)
+
+    if (!isChorus) lastPlayer = player
+
+    for (let ci = 0; ci < chunk.lineCount && lineIdx < wordTimestamps.length; ci++, lineIdx++) {
+      const lineWords = wordTimestamps[lineIdx]
+      if (lineWords.length === 0) {
+        result.push({ words: [], lineIndex: lineIdx })
+        continue
+      }
+
+      const assignedWords: AssignedWord[] = lineWords.map((w) => ({
+        ...w,
+        player,
+      }))
+
+      if (!isChorus) {
+        for (const w of assignedWords) {
+          durations[player] += w.endMs - w.startMs
+        }
+      }
+
+      result.push({ words: assignedWords, lineIndex: lineIdx })
+    }
+  }
+
+  // Handle any remaining lines not covered by chunks
+  while (lineIdx < wordTimestamps.length) {
+    const lineWords = wordTimestamps[lineIdx]
+    const player = pickBalancedPlayer(durations, lastPlayer, 1, 1, rand)
+    lastPlayer = player
+    const assignedWords: AssignedWord[] = lineWords.map((w) => ({ ...w, player }))
+    for (const w of assignedWords) durations[player] += w.endMs - w.startMs
+    result.push({ words: assignedWords, lineIndex: lineIdx })
+    lineIdx++
+  }
+
+  return result
+}
+
+/**
+ * Optionally mark chorus lines as EVERYONE in an existing assignment.
+ * Call after any level's assignment to make choruses collective.
+ */
+function markChorusesAsEveryone(
+  lines: AssignedLine[],
+  chunkInfos?: ChunkInfo[],
+): AssignedLine[] {
+  if (!chunkInfos || chunkInfos.length === 0) return lines
+
+  let lineIdx = 0
+  for (const chunk of chunkInfos) {
+    const isChorus = chunk.chunkType === 'chorus'
+    for (let ci = 0; ci < chunk.lineCount && lineIdx < lines.length; ci++, lineIdx++) {
+      if (isChorus) {
+        lines[lineIdx] = {
+          ...lines[lineIdx],
+          words: lines[lineIdx].words.map((w) => ({ ...w, player: EVERYONE })),
+        }
+      }
+    }
+  }
+
+  return lines
 }
 
 /**
@@ -250,25 +353,35 @@ function assignLevel3(
 
 /**
  * Main entry point: generate player assignments for Karaoke Madness.
+ *
+ * @param chunkInfos - Optional chunk boundaries for verse-by-verse mode and chorus detection.
  */
 export function generateAssignments(
   wordTimestamps: WordTimestamp[][],
   playerCount: 2 | 3 | 4,
-  difficulty: 1 | 2 | 3,
+  difficulty: 0 | 1 | 2 | 3,
   seed: number = Date.now(),
+  chunkInfos?: ChunkInfo[],
 ): PlayerAssignment {
   const rand = createPRNG(seed)
 
   let lines: AssignedLine[]
   switch (difficulty) {
+    case 0:
+      lines = assignLevel0(wordTimestamps, playerCount, rand, chunkInfos)
+      break
     case 1:
       lines = assignLevel1(wordTimestamps, playerCount, rand)
+      // Mark choruses as EVERYONE
+      lines = markChorusesAsEveryone(lines, chunkInfos)
       break
     case 2:
       lines = assignLevel2(wordTimestamps, playerCount, rand)
+      lines = markChorusesAsEveryone(lines, chunkInfos)
       break
     case 3:
       lines = assignLevel3(wordTimestamps, playerCount, rand)
+      // Level 3 is pure chaos — no chorus exception
       break
   }
 
@@ -309,10 +422,19 @@ export function computeGameStats(
 
   for (const line of lines) {
     for (const word of line.words) {
-      wordCounts[word.player]++
-      totalDurationMs[word.player] += word.endMs - word.startMs
+      if (word.player === EVERYONE) {
+        // EVERYONE words count for all players equally
+        for (let p = 0; p < playerCount; p++) {
+          wordCounts[p]++
+          totalDurationMs[p] += word.endMs - word.startMs
+        }
+      } else if (word.player >= 0 && word.player < playerCount) {
+        wordCounts[word.player]++
+        totalDurationMs[word.player] += word.endMs - word.startMs
+      }
 
-      if (word.player === currentPlayer) {
+      const effectivePlayer = word.player === EVERYONE ? -2 : word.player
+      if (effectivePlayer === currentPlayer) {
         currentStretchEnd = word.endMs
       } else {
         if (currentPlayer >= 0) {
@@ -321,7 +443,7 @@ export function computeGameStats(
             longestStretchMs[currentPlayer] = stretch
           }
         }
-        currentPlayer = word.player
+        currentPlayer = effectivePlayer
         currentStretchStart = word.startMs
         currentStretchEnd = word.endMs
       }

@@ -332,6 +332,8 @@
     "playerCount": "Number of Players",
     "playerNames": "Player Names",
     "difficulty": "Difficulty",
+    "level0": "Verse by Verse",
+    "level0Desc": "Each verse — a different player. Chorus — everyone together!",
     "level1": "Line by Line",
     "level1Desc": "Each line — a different player",
     "level2": "Phrases",
@@ -355,7 +357,9 @@
     "playAgain": "Play Again",
     "changeSettings": "Change Settings",
     "pickAnotherSong": "Pick Another Song",
-    "finished": "Finished!"
+    "finished": "Finished!",
+    "everyone": "Everyone!",
+    "nextLevel": "Level up!"
   },
   "rescan": {
     "title": "Weekly Auto-Scan",

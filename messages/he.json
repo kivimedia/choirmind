@@ -332,6 +332,8 @@
     "playerCount": "מספר שחקנים",
     "playerNames": "שמות שחקנים",
     "difficulty": "רמת קושי",
+    "level0": "בית בית",
+    "level0Desc": "כל בית — שחקן אחר. פזמון — כולם יחד!",
     "level1": "שורה שורה",
     "level1Desc": "כל שורה — שחקן אחר",
     "level2": "ביטויים",
@@ -355,7 +357,9 @@
     "playAgain": "שחקו שוב",
     "changeSettings": "שנו הגדרות",
     "pickAnotherSong": "בחרו שיר אחר",
-    "finished": "סיום!"
+    "finished": "סיום!",
+    "everyone": "כולם!",
+    "nextLevel": "הגבירו טירוף!"
   },
   "rescan": {
     "title": "סריקה אוטומטית שבועית",

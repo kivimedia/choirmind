@@ -11,8 +11,10 @@ import {
   generateAssignments,
   computeGameStats,
   PLAYER_COLORS,
+  EVERYONE,
   type WordTimestamp,
   type PlayerAssignment,
+  type ChunkInfo,
 } from '@/lib/karaoke-madness'
 import type { AudioTrackData, VoicePart } from '@/lib/audio/types'
 
@@ -24,6 +26,7 @@ interface Chunk {
   id: string
   label: string
   lyrics: string
+  chunkType: string
   lineTimestamps: number[] | null
   wordTimestamps: WordTimestamp[][] | null
 }
@@ -39,6 +42,7 @@ interface ReferenceVocal {
 interface SongData {
   id: string
   title: string
+  language: string
   chunks: Chunk[]
   audioTracks?: AudioTrackData[]
   referenceVocals?: ReferenceVocal[]
@@ -52,6 +56,7 @@ type GamePhase = 'setup' | 'countdown' | 'playing' | 'ended'
 // ---------------------------------------------------------------------------
 
 const DIFFICULTY_LABELS: Record<number, { he: string; desc: string }> = {
+  0: { he: 'בית בית', desc: 'כל בית — שחקן אחר. פזמון — כולם יחד!' },
   1: { he: 'שורה שורה', desc: 'כל שורה — שחקן אחר' },
   2: { he: 'ביטויים', desc: 'כל ביטוי של 2-3 מילים — שחקן אחר' },
   3: { he: 'מילה מילה', desc: 'כל מילה — שחקן אחר. טירוף!' },
@@ -66,6 +71,16 @@ function mergeAllWordTimestamps(chunks: Chunk[]): WordTimestamp[][] {
     }
   }
   return allLines
+}
+
+/** Build ChunkInfo[] from chunks for verse-by-verse assignment. */
+function buildChunkInfos(chunks: Chunk[]): ChunkInfo[] {
+  return chunks
+    .filter((c) => c.wordTimestamps && c.wordTimestamps.some((line) => line.length > 0))
+    .map((c) => ({
+      lineCount: c.wordTimestamps!.length,
+      chunkType: c.chunkType || 'verse',
+    }))
 }
 
 /** Check if song has word timestamps. */
@@ -104,10 +119,11 @@ export default function KaraokeMadnessPage() {
     } catch { /* ignore */ }
     return ['', '', '', '']
   })
-  const [difficulty, setDifficulty] = useState<1 | 2 | 3>(() => {
+  const [difficulty, setDifficulty] = useState<0 | 1 | 2 | 3>(() => {
     if (typeof window === 'undefined') return 1
     const saved = localStorage.getItem('km_difficulty')
-    return saved ? (Number(saved) as 1 | 2 | 3) : 1
+    const n = Number(saved)
+    return (n >= 0 && n <= 3) ? (n as 0 | 1 | 2 | 3) : 1
   })
   const [audioMode, setAudioMode] = useState<'karaoke' | 'full'>(() => {
     if (typeof window === 'undefined') return 'karaoke'
@@ -227,14 +243,31 @@ export default function KaraokeMadnessPage() {
     setSyncing(false)
   }
 
-  // Start game
-  function handleStart() {
+  // Build chunk infos for verse-by-verse mode and chorus detection
+  const chunkInfos = useMemo(() => song ? buildChunkInfos(song.chunks) : [], [song])
+
+  // Start game (or re-generate with a new difficulty)
+  function startWithDifficulty(d: 0 | 1 | 2 | 3) {
     if (!song) return
     const allWordTimestamps = mergeAllWordTimestamps(song.chunks)
-    const result = generateAssignments(allWordTimestamps, playerCount, difficulty)
+    const result = generateAssignments(allWordTimestamps, playerCount, d, Date.now(), chunkInfos)
     setAssignment(result)
+    setDifficulty(d)
+    return result
+  }
+
+  function handleStart() {
+    startWithDifficulty(difficulty)
     setPhase('countdown')
     setCountdown(3)
+  }
+
+  // Switch to next difficulty level mid-game
+  function handleNextLevel() {
+    const nextDifficulty = Math.min(difficulty + 1, 3) as 0 | 1 | 2 | 3
+    if (nextDifficulty === difficulty) return
+    startWithDifficulty(nextDifficulty)
+    // Keep playing — don't restart audio, just reassign words
   }
 
   // Countdown
@@ -386,7 +419,7 @@ export default function KaraokeMadnessPage() {
         <Card className="!p-4 space-y-3">
           <label className="block text-sm font-medium text-foreground">רמת קושי</label>
           <div className="space-y-2">
-            {([1, 2, 3] as const).map((d) => (
+            {([0, 1, 2, 3] as const).map((d) => (
               <button
                 key={d}
                 type="button"
@@ -496,7 +529,7 @@ export default function KaraokeMadnessPage() {
         </div>
 
         <p className="mt-6 text-sm text-text-muted">
-          {DIFFICULTY_LABELS[difficulty].he} &middot; {playerCount} {effectiveNames.length > 0 ? 'שחקנים' : ''}
+          {DIFFICULTY_LABELS[difficulty]?.he} &middot; {playerCount} {effectiveNames.length > 0 ? 'שחקנים' : ''}
         </p>
 
         <style>{`
@@ -527,16 +560,27 @@ export default function KaraokeMadnessPage() {
               <span className="text-sm font-medium text-foreground">{name}</span>
             </div>
           ))}
-          <button
-            type="button"
-            onClick={() => {
-              audioActionsRef.current?.pause()
-              setPhase('ended')
-            }}
-            className="ms-auto text-xs text-text-muted hover:text-foreground"
-          >
-            סיום
-          </button>
+          <div className="ms-auto flex items-center gap-2">
+            {difficulty < 3 && (
+              <button
+                type="button"
+                onClick={handleNextLevel}
+                className="text-xs text-primary hover:text-primary/80 font-medium"
+              >
+                {DIFFICULTY_LABELS[difficulty + 1]?.he} &#x25B6;
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                audioActionsRef.current?.pause()
+                setPhase('ended')
+              }}
+              className="text-xs text-text-muted hover:text-foreground"
+            >
+              סיום
+            </button>
+          </div>
         </div>
 
         {/* Audio player */}
@@ -555,6 +599,7 @@ export default function KaraokeMadnessPage() {
             lines={assignment.lines}
             playerNames={effectiveNames}
             currentTimeMs={currentTimeMs}
+            language={song.language}
           />
         </div>
       </div>
