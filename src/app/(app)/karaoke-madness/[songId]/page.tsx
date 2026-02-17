@@ -548,12 +548,12 @@ export default function KaraokeMadnessPage() {
     )
   }
 
-  // -- Playing phase --
+  // -- Playing phase (full-screen overlay) --
   if (phase === 'playing' && assignment) {
     return (
-      <div dir="rtl" className="flex flex-col h-[calc(100dvh-4rem)] text-start">
-        {/* Sticky top controls */}
-        <div className="sticky top-0 z-10 bg-background pb-2 shrink-0">
+      <div dir="rtl" className="fixed inset-0 z-50 flex flex-col bg-background text-start">
+        {/* Fixed top controls */}
+        <div className="shrink-0 px-4 pt-3 pb-2">
           {/* Player bar */}
           <div className="flex items-center gap-3 mb-2">
             {effectiveNames.map((name, i) => (
@@ -586,29 +586,31 @@ export default function KaraokeMadnessPage() {
           />
         </div>
 
-        {/* Lyrics display */}
-        <div className="flex-1 min-h-0 rounded-xl border border-border bg-surface p-3 sm:p-6 mb-4 overflow-y-auto">
-          <KaraokeMadnessDisplay
-            lines={assignment.lines}
-            playerNames={effectiveNames}
-            currentTimeMs={currentTimeMs}
-            language={song.language}
-            onLineClick={(lineIdx) => {
-              const line = assignment.lines[lineIdx]
-              if (line?.words.length > 0) {
-                audioActionsRef.current?.seekTo(line.words[0].startMs)
-              }
-            }}
-          />
+        {/* Lyrics display — scrollable middle */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-4">
+          <div className="rounded-xl border border-border bg-surface p-3 sm:p-6">
+            <KaraokeMadnessDisplay
+              lines={assignment.lines}
+              playerNames={effectiveNames}
+              currentTimeMs={currentTimeMs}
+              language={song.language}
+              onLineClick={(lineIdx) => {
+                const line = assignment.lines[lineIdx]
+                if (line?.words.length > 0) {
+                  audioActionsRef.current?.seekTo(line.words[0].startMs)
+                }
+              }}
+            />
+          </div>
         </div>
 
-        {/* Big "Make it crazier" button — fixed at bottom */}
+        {/* Fixed bottom: "Make it crazier" button */}
         {difficulty < 3 && (
-          <div className="shrink-0 pb-3">
+          <div className="shrink-0 px-4 py-3">
             <button
               type="button"
               onClick={handleNextLevel}
-              className="w-full rounded-xl bg-gradient-to-r from-rose-500 via-purple-500 to-indigo-500 px-6 py-3 text-lg font-black text-white shadow-lg shadow-purple-500/30 transition-transform hover:scale-[1.02] active:scale-95"
+              className="w-full rounded-xl bg-gradient-to-r from-rose-500 via-purple-500 to-indigo-500 px-6 py-3.5 text-lg font-black text-white shadow-lg shadow-purple-500/30 transition-transform hover:scale-[1.02] active:scale-95"
               style={{ animation: 'crazier-pulse 2s ease-in-out infinite' }}
             >
               &#x1F525; {DIFFICULTY_LABELS[difficulty + 1]?.he} &#x2014; יאללה טירוף! &#x1F525;

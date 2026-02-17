@@ -215,6 +215,34 @@ function markChorusesAsEveryone(
 }
 
 /**
+ * Randomly sprinkle EVERYONE lines throughout the assignment.
+ * ~20% of non-empty lines become EVERYONE for fun "all together!" moments.
+ */
+function sprinkleEveryone(
+  lines: AssignedLine[],
+  rand: () => number,
+): AssignedLine[] {
+  const nonEmptyIndices = lines
+    .map((l, i) => l.words.length > 0 ? i : -1)
+    .filter((i) => i >= 0)
+
+  if (nonEmptyIndices.length < 4) return lines // too few lines to sprinkle
+
+  // Mark ~20% of lines as EVERYONE, but skip lines already marked
+  for (const idx of nonEmptyIndices) {
+    const alreadyEveryone = lines[idx].words[0]?.player === EVERYONE
+    if (!alreadyEveryone && rand() < 0.18) {
+      lines[idx] = {
+        ...lines[idx],
+        words: lines[idx].words.map((w) => ({ ...w, player: EVERYONE })),
+      }
+    }
+  }
+
+  return lines
+}
+
+/**
  * Level 1: Assign entire lines to random players.
  * Max 2 consecutive lines to the same player.
  */
@@ -369,19 +397,22 @@ export function generateAssignments(
   switch (difficulty) {
     case 0:
       lines = assignLevel0(wordTimestamps, playerCount, rand, chunkInfos)
+      lines = sprinkleEveryone(lines, rand)
       break
     case 1:
       lines = assignLevel1(wordTimestamps, playerCount, rand)
-      // Mark choruses as EVERYONE
       lines = markChorusesAsEveryone(lines, chunkInfos)
+      lines = sprinkleEveryone(lines, rand)
       break
     case 2:
       lines = assignLevel2(wordTimestamps, playerCount, rand)
       lines = markChorusesAsEveryone(lines, chunkInfos)
+      lines = sprinkleEveryone(lines, rand)
       break
     case 3:
       lines = assignLevel3(wordTimestamps, playerCount, rand)
       lines = markChorusesAsEveryone(lines, chunkInfos)
+      lines = sprinkleEveryone(lines, rand)
       break
   }
 
