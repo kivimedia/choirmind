@@ -45,7 +45,7 @@ function normalize(text: string): string {
   return text
     .replace(/[\u0591-\u05C7]/g, '')    // strip cantillation + nikkud
     .replace(/[\u05BE\u05C0\u05C3\u05C6\u05F3\u05F4]/g, '') // maqaf, etc.
-    .replace(/[^\w\u0590-\u05FF\s]/g, '') // keep letters + spaces
+    .replace(/[^\p{L}\p{N}\s]/gu, '')   // keep all Unicode letters + digits + spaces
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase()
