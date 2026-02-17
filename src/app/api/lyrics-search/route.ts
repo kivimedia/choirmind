@@ -36,35 +36,43 @@ export async function GET(request: NextRequest) {
       const dbResults = await searchInternalDb(query, composer)
       results.push(...dbResults)
     } catch (e) {
-      console.error('Internal DB lyrics search error:', e)
+      console.error('[lyrics-search] Internal DB error:', e)
     }
 
-    // Source 2: Shironet (Hebrew lyrics — search + scrape)
+    // Source 2: Genius (API-based — works reliably from cloud IPs)
+    try {
+      const geniusResults = await searchGenius(query)
+      results.push(...geniusResults)
+    } catch (e) {
+      console.error('[lyrics-search] Genius error:', e)
+    }
+
+    // Source 3: LRCLIB (free, no API key needed) — good for international songs
+    try {
+      const lrcResults = await searchLrclib(query, composer)
+      results.push(...lrcResults)
+    } catch (e) {
+      console.error('[lyrics-search] LRCLIB error:', e)
+    }
+
+    // Source 4: Shironet (Hebrew lyrics — search + scrape)
     if (lang === 'he' || lang === 'mixed') {
       try {
         const shironetResults = await searchShironet(query)
         results.push(...shironetResults)
       } catch (e) {
-        console.error('Shironet lyrics search error:', e)
+        console.error('[lyrics-search] Shironet error:', e)
       }
     }
 
-    // Source 3: Tab4U (Hebrew lyrics — search + scrape)
+    // Source 5: Tab4U (Hebrew lyrics — search + scrape)
     if (lang === 'he' || lang === 'mixed') {
       try {
         const tab4uResults = await searchTab4u(query)
         results.push(...tab4uResults)
       } catch (e) {
-        console.error('Tab4U lyrics search error:', e)
+        console.error('[lyrics-search] Tab4U error:', e)
       }
-    }
-
-    // Source 4: LRCLIB (free, no API key needed) — good for international songs
-    try {
-      const lrcResults = await searchLrclib(query, composer)
-      results.push(...lrcResults)
-    } catch (e) {
-      console.error('LRCLIB lyrics search error:', e)
     }
 
     // Deduplicate by lyrics content similarity
@@ -138,6 +146,92 @@ function normalizeTitle(title: string): string {
     .replace(/[^\w\u0590-\u05FF\s]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+// ---------------------------------------------------------------------------
+// Genius (API search + page scrape — most reliable from cloud IPs)
+// ---------------------------------------------------------------------------
+
+async function searchGenius(query: string): Promise<LyricsResult[]> {
+  // Step 1: Search via Genius API (no auth needed for basic search)
+  const searchUrl = `https://genius.com/api/search?q=${encodeURIComponent(query)}`
+
+  const searchRes = await fetch(searchUrl, {
+    headers: {
+      'User-Agent': USER_AGENT,
+      'Accept': 'application/json',
+    },
+    signal: AbortSignal.timeout(8000),
+  })
+
+  if (!searchRes.ok) return []
+
+  const searchData = await searchRes.json()
+  const hits: Array<{
+    type: string
+    result: {
+      title: string
+      url: string
+      lyrics_state: string
+      primary_artist?: { name: string }
+    }
+  }> = searchData?.response?.hits || []
+
+  // Find the first song hit with complete lyrics
+  const songHit = hits.find(
+    (h) => h.type === 'song' && h.result?.lyrics_state === 'complete' && h.result?.url,
+  )
+
+  if (!songHit) return []
+
+  // Step 2: Fetch the song page and extract lyrics
+  const pageRes = await fetch(songHit.result.url, {
+    headers: {
+      'User-Agent': USER_AGENT,
+      'Accept': 'text/html,application/xhtml+xml',
+    },
+    signal: AbortSignal.timeout(10000),
+  })
+
+  if (!pageRes.ok) return []
+  const html = await pageRes.text()
+
+  // Genius stores lyrics in <div data-lyrics-container="true"> elements
+  const containerPattern = /data-lyrics-container="true"[^>]*>([\s\S]*?)<\/div>/gi
+  const blocks: string[] = []
+  let match: RegExpExecArray | null
+  while ((match = containerPattern.exec(html)) !== null) {
+    const text = match[1]
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .trim()
+    if (text.length > 0) {
+      blocks.push(decodeHtmlEntities(text))
+    }
+  }
+
+  if (blocks.length === 0) return []
+
+  // Convert [Verse 1], [Chorus] etc. to Hebrew labels for chunk auto-detection
+  const rawLyrics = blocks.join('\n\n')
+  const cleanedLyrics = rawLyrics
+    .replace(/\[Verse\s*(\d*)\]/gi, (_, n) => `בית${n ? ` ${n}` : ''}`)
+    .replace(/\[Chorus\s*\d*\]/gi, 'פזמון')
+    .replace(/\[Bridge\s*\d*\]/gi, 'גשר')
+    .replace(/\[Intro\]/gi, 'פתיחה')
+    .replace(/\[Outro\]/gi, 'סיום')
+    .replace(/\[Pre-Chorus\s*\d*\]/gi, 'מעבר')
+    .replace(/\[Post-Chorus\s*\d*\]/gi, '')
+    .replace(/\[.*?\]\n?/g, '') // remove any remaining section headers
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+  return [{
+    source: 'Genius',
+    title: songHit.result.title,
+    artist: songHit.result.primary_artist?.name || '',
+    lyrics: cleanedLyrics,
+  }]
 }
 
 // ---------------------------------------------------------------------------
@@ -467,11 +561,10 @@ function buildSearchLinks(title: string, composer: string, lang: string) {
             url: `https://www.tab4u.com/resultsSearch?tab=songs&q=${encodeURIComponent(query)}`,
           },
         ]
-      : [
-          {
-            label: 'Genius',
-            url: `https://genius.com/search?q=${encodeURIComponent(query)}`,
-          },
-        ]),
+      : []),
+    {
+      label: 'Genius',
+      url: `https://genius.com/search?q=${encodeURIComponent(query)}`,
+    },
   ]
 }

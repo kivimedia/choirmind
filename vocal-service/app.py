@@ -37,7 +37,13 @@ logger = logging.getLogger("vocal-service")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("ffmpeg", "libsndfile1", "nodejs")
+    .apt_install("ffmpeg", "libsndfile1", "curl", "xz-utils")
+    .run_commands(
+        "curl -fsSL https://nodejs.org/dist/v20.18.1/node-v20.18.1-linux-x64.tar.xz -o /tmp/node.tar.xz && "
+        "tar -xJf /tmp/node.tar.xz --strip-components=1 -C /usr/local && "
+        "rm /tmp/node.tar.xz && "
+        "node --version"
+    )
     .pip_install(
         "fastapi",
         "uvicorn",
@@ -57,6 +63,7 @@ image = (
         "demucs",
         "yt-dlp",
     )
+    .run_commands("pip uninstall -y yt-dlp-get-pot bgutil-ytdlp-pot-provider 2>/dev/null || true")
     .env({"TORCHAUDIO_BACKEND": "soundfile", "TORCH_HOME": "/root/.cache/torch"})
     # Pre-download all 4 Demucs htdemucs_ft checkpoint files into the image.
     # Using Python+urllib to guarantee files persist on disk in the image layer.
@@ -78,7 +85,7 @@ image = (
 app = modal.App(
     name="choirmind-vocal-service",
     image=image,
-    secrets=[modal.Secret.from_name("choirmind-vocal")],
+    secrets=[modal.Secret.from_name("choirmind-vocal"), modal.Secret.from_name("choirmind-proxy")],
 )
 
 web_app = FastAPI(title="Choirmind Vocal Analysis", version="1.0.0")
@@ -1243,58 +1250,75 @@ async def prepare_reference(req: PrepareReferenceRequest):
 
 @web_app.post("/api/v1/youtube-extract")
 async def youtube_extract(req: YouTubeExtractRequest):
-    """Download audio from YouTube URL and upload to S3.
-
-    Uses yt-dlp to download best audio, converts to WAV,
-    uploads to S3, returns the S3 key and duration.
+    """Download audio from YouTube URL via yt-dlp (routed through residential proxy),
+    convert to WAV, upload to S3, return S3 key and duration.
     """
     import subprocess
+    import random
 
     logger.info("youtube-extract: url=%s", req.youtube_url)
 
+    # Residential proxy (required for YouTube from cloud IPs)
+    proxy_url = os.environ.get("RESIDENTIAL_PROXY_URL", "")
+    if not proxy_url:
+        raise HTTPException(
+            status_code=500,
+            detail="Residential proxy not configured. Set RESIDENTIAL_PROXY_URL in secrets.",
+        )
+
+    # Rotate session ID for each request to get a different residential IP
+    session_id = random.randint(100000, 999999)
+    # Support Smartproxy/Decodo format: inject session into username
+    # e.g. http://user-session123:pass@gate.smartproxy.com:10000
+    proxy = proxy_url.replace("{SESSION}", str(session_id))
+
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
+            wav_path = os.path.join(tmpdir, "audio.wav")
             output_template = os.path.join(tmpdir, "audio.%(ext)s")
 
-            # Download best audio with yt-dlp
+            # Download audio via yt-dlp through residential proxy
+            logger.info("youtube-extract: downloading via yt-dlp with residential proxy (session=%d)", session_id)
             result = subprocess.run(
                 [
                     "yt-dlp",
+                    "--proxy", proxy,
                     "--no-playlist",
                     "-x",
                     "--audio-format", "wav",
                     "--audio-quality", "0",
+                    "--js-runtimes", "node:/usr/local/bin/node",
+                    "--remote-components", "ejs:github",
+                    "--no-check-certificates",
                     "-o", output_template,
                     req.youtube_url,
                 ],
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=180,
             )
 
             if result.returncode != 0:
-                logger.error("yt-dlp failed: %s", result.stderr)
-                raise HTTPException(status_code=422, detail=f"yt-dlp failed: {result.stderr[:200]}")
+                error_detail = result.stderr[:300] if result.stderr else "Unknown error"
+                logger.error("youtube-extract: yt-dlp failed: %s", error_detail)
+                raise HTTPException(status_code=422, detail=f"yt-dlp failed: {error_detail}")
 
-            # Find the output file
-            wav_path = os.path.join(tmpdir, "audio.wav")
+            # Find the output file (yt-dlp may name it differently)
             if not os.path.exists(wav_path):
-                # yt-dlp may have created a different extension
                 for f in os.listdir(tmpdir):
                     if f.startswith("audio."):
-                        # Convert to wav if needed
                         src = os.path.join(tmpdir, f)
                         if not f.endswith(".wav"):
                             subprocess.run(
                                 ["ffmpeg", "-y", "-i", src, "-ar", "44100", "-ac", "2", wav_path],
-                                check=True, capture_output=True, timeout=60,
+                                check=True, capture_output=True, timeout=120,
                             )
                         else:
                             wav_path = src
                         break
 
             if not os.path.exists(wav_path):
-                raise HTTPException(status_code=500, detail="Failed to extract audio")
+                raise HTTPException(status_code=500, detail="Failed to extract audio file")
 
             # Get duration
             import soundfile as sf

@@ -40,45 +40,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Step 1: Extract audio from YouTube via vocal service
-    console.log(`[youtube-import] Extracting audio from: ${youtubeUrl}`)
-    const extractRes = await fetch(`${vocalServiceUrl}/api/v1/youtube-extract`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ youtube_url: youtubeUrl }),
-      signal: AbortSignal.timeout(180000), // 3 min timeout
-    })
-
-    if (!extractRes.ok) {
-      const err = await extractRes.json().catch(() => ({ detail: 'Failed to extract audio' }))
-      return NextResponse.json({ error: err.detail || 'YouTube extraction failed' }, { status: 502 })
-    }
-
-    const extractData = await extractRes.json()
-    const { audio_s3_key, audio_url, duration_ms } = extractData
-
-    console.log(`[youtube-import] Audio extracted: ${audio_s3_key} (${duration_ms}ms)`)
-
-    // Step 2: Separate stems via vocal service
-    console.log(`[youtube-import] Separating stems...`)
-    const separateRes = await fetch(`${vocalServiceUrl}/api/v1/separate-stems`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ s3_key: audio_s3_key }),
-      signal: AbortSignal.timeout(300000), // 5 min timeout
-    })
-
-    let vocalsUrl: string | null = null
-    let accompanimentUrl: string | null = null
-    if (separateRes.ok) {
-      const separateData = await separateRes.json()
-      vocalsUrl = separateData.vocals_url
-      accompanimentUrl = separateData.accompaniment_url
-      console.log(`[youtube-import] Stems separated`)
-    } else {
-      console.warn(`[youtube-import] Stem separation failed, continuing with full audio only`)
-    }
-
     // Extract YouTube video ID from URL
     let videoId: string | null = null
     try {
@@ -88,7 +49,52 @@ export async function POST(request: NextRequest) {
       // Non-critical
     }
 
-    // Step 3: Create song with audio tracks
+    // Build chunks from lyrics
+    const chunkData = lyrics && lyrics.trim()
+      ? splitLyricsToChunks(lyrics)
+      : [{ label: 'שיר מלא', chunkType: 'verse', order: 0, lyrics: '(טקסט יתווסף מאוחר יותר)' }]
+
+    // ── Step 1: Extract audio from YouTube ───────────────────────────
+    console.log(`[youtube-import] Extracting audio from: ${youtubeUrl}`)
+    const extractRes = await fetch(`${vocalServiceUrl}/api/v1/youtube-extract`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ youtube_url: youtubeUrl }),
+      signal: AbortSignal.timeout(200000), // 3+ min for proxy download
+    })
+
+    if (!extractRes.ok) {
+      const err = await extractRes.json().catch(() => ({ detail: 'Failed to extract audio' }))
+      return NextResponse.json({ error: err.detail || 'YouTube audio extraction failed' }, { status: 502 })
+    }
+
+    const extractData = await extractRes.json()
+    const { audio_s3_key, audio_url, duration_ms } = extractData
+    console.log(`[youtube-import] Audio extracted: ${audio_s3_key} (${duration_ms}ms)`)
+
+    // ── Step 2: Separate stems ───────────────────────────────────────
+    let accompanimentUrl: string | null = null
+    try {
+      console.log(`[youtube-import] Separating stems...`)
+      const separateRes = await fetch(`${vocalServiceUrl}/api/v1/separate-stems`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ s3_key: audio_s3_key }),
+        signal: AbortSignal.timeout(300000),
+      })
+
+      if (separateRes.ok) {
+        const separateData = await separateRes.json()
+        accompanimentUrl = separateData.accompaniment_url
+        console.log(`[youtube-import] Stems separated`)
+      } else {
+        console.warn(`[youtube-import] Stem separation failed, continuing with full audio only`)
+      }
+    } catch {
+      console.warn(`[youtube-import] Stem separation error`)
+    }
+
+    // ── Step 3: Create song + audio tracks ───────────────────────────
     const song = await prisma.song.create({
       data: {
         title,
@@ -98,26 +104,11 @@ export async function POST(request: NextRequest) {
         personalUserId: !choirId ? userId : null,
         youtubeVideoId: videoId,
         source: 'youtube',
-        chunks: {
-          create: lyrics
-            ? [{
-                label: 'שיר מלא',
-                chunkType: 'verse',
-                order: 0,
-                lyrics,
-              }]
-            : [{
-                label: 'שיר מלא',
-                chunkType: 'verse',
-                order: 0,
-                lyrics: '(טקסט יתווסף מאוחר יותר)',
-              }],
-        },
+        chunks: { create: chunkData },
       },
       include: { chunks: true },
     })
 
-    // Create audio tracks
     const tracks = []
 
     // Full mix track
@@ -148,7 +139,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Step 4: Auto-sync lyrics if we have lyrics and audio
+    // ── Step 4: Auto-sync lyrics if available ────────────────────────
     let syncResult = null
     if (lyrics && lyrics.trim()) {
       try {
@@ -177,10 +168,44 @@ export async function POST(request: NextRequest) {
         ...song,
         audioTracks: tracks,
       },
+      audioImported: true,
       syncResult,
     })
   } catch (error) {
     console.error('POST /api/songs/youtube-import error:', error)
     return NextResponse.json({ error: 'YouTube import failed' }, { status: 500 })
   }
+}
+
+// Split lyrics into chunks by blank lines
+function splitLyricsToChunks(lyrics: string) {
+  const sections = lyrics.split(/\n\s*\n/).map(s => s.trim()).filter(Boolean)
+  if (sections.length === 0) {
+    return [{ label: 'שיר מלא', chunkType: 'verse', order: 0, lyrics }]
+  }
+
+  let verseCount = 1
+  return sections.map((section, i) => {
+    const firstLine = section.split('\n')[0].trim()
+
+    // Check for Hebrew section headers
+    if (/^פזמון\s*[:\-]?\s*/i.test(firstLine)) {
+      const body = section.replace(/^פזמון\s*[:\-]?\s*/i, '').trim() || section.split('\n').slice(1).join('\n').trim()
+      return { label: 'פזמון', chunkType: 'chorus', order: i, lyrics: body }
+    }
+    if (/^גשר\s*[:\-]?\s*/i.test(firstLine)) {
+      const body = section.replace(/^גשר\s*[:\-]?\s*/i, '').trim() || section.split('\n').slice(1).join('\n').trim()
+      return { label: 'גשר', chunkType: 'bridge', order: i, lyrics: body }
+    }
+    if (/^בית\s*\d*\s*[:\-]?\s*/i.test(firstLine)) {
+      const body = section.replace(/^בית\s*\d*\s*[:\-]?\s*/i, '').trim() || section.split('\n').slice(1).join('\n').trim()
+      const label = `בית ${verseCount}`
+      verseCount++
+      return { label, chunkType: 'verse', order: i, lyrics: body }
+    }
+
+    const label = `בית ${verseCount}`
+    verseCount++
+    return { label, chunkType: 'verse', order: i, lyrics: section }
+  })
 }

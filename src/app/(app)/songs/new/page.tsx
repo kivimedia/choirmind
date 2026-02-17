@@ -246,18 +246,39 @@ export default function NewSongPage() {
     setYoutubeVideoId(extracted)
   }
 
+  // YouTube import steps for progress display
+  const YT_IMPORT_STEPS = [
+    { key: 'create', label: 'יוצר שיר עם מילים', duration: 3000 },
+    { key: 'extract', label: 'מוריד שמע מ-YouTube', duration: 30000 },
+    { key: 'separate', label: 'מפריד קולות וליווי', duration: 90000 },
+    { key: 'sync', label: 'מסנכרן מילים', duration: 30000 },
+  ]
+  const [ytImportStepIndex, setYtImportStepIndex] = useState(-1)
+  const [ytAudioSkipped, setYtAudioSkipped] = useState(false)
+
   // YouTube import: download audio + separate stems + create song
   async function handleYoutubeImport() {
+    if (ytImporting) return // prevent double-click
     if (!youtubeInput.trim() || !title.trim()) {
       setError('נא להזין שם שיר וקישור YouTube')
       return
     }
     setYtImporting(true)
-    setYtImportStep('מחלץ שמע מ-YouTube...')
+    setYtImportStepIndex(0)
+    setYtImportStep(YT_IMPORT_STEPS[0].label)
     setError(null)
 
+    // Simulate step progress while the API processes
+    let stepIdx = 0
+    const stepTimer = setInterval(() => {
+      stepIdx++
+      if (stepIdx < YT_IMPORT_STEPS.length) {
+        setYtImportStepIndex(stepIdx)
+        setYtImportStep(YT_IMPORT_STEPS[stepIdx].label)
+      }
+    }, 35000) // advance step roughly every 35s
+
     try {
-      // Gather lyrics from paste tab if available
       const lyricsText = pastedLyrics.trim() || undefined
 
       const res = await fetch('/api/songs/youtube-import', {
@@ -272,21 +293,33 @@ export default function NewSongPage() {
         }),
       })
 
+      clearInterval(stepTimer)
+
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: 'YouTube import failed' }))
         throw new Error(data.error || 'YouTube import failed')
       }
 
       const data = await res.json()
-      setYtImportStep('הושלם!')
+
+      if (data.audioImported) {
+        setYtImportStepIndex(YT_IMPORT_STEPS.length) // all done
+        setYtImportStep('הושלם!')
+      } else {
+        // Song created but audio download failed
+        setYtAudioSkipped(true)
+        setYtImportStepIndex(YT_IMPORT_STEPS.length)
+        setYtImportStep('השיר נוצר (ללא שמע)')
+      }
       setTimeout(() => {
         router.push(`/songs/${data.song.id}`)
-      }, 500)
+      }, 1500)
     } catch (err) {
+      clearInterval(stepTimer)
       setError(err instanceof Error ? err.message : 'שגיאת ייבוא YouTube')
-    } finally {
       setYtImporting(false)
       setYtImportStep(null)
+      setYtImportStepIndex(-1)
     }
   }
 
@@ -1118,14 +1151,9 @@ export default function NewSongPage() {
                   <svg className="h-5 w-5 text-primary shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
                   </svg>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-foreground">
-                      {ytImportStep || 'בשמירה: הורדת אודיו + הפרדת קולות + סנכרון אוטומטי'}
-                    </p>
-                  </div>
-                  {ytImporting && (
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                  )}
+                  <p className="text-sm font-medium text-foreground">
+                    בשמירה יורד שמע, יופרדו קולות, ויסונכרנו מילים אוטומטית
+                  </p>
                 </div>
 
                 {/* Lyrics search status */}
@@ -1313,13 +1341,15 @@ export default function NewSongPage() {
         <Button
           variant="ghost"
           onClick={() => router.push('/songs')}
+          disabled={ytImporting}
         >
           {t('cancel')}
         </Button>
         <Button
           variant="primary"
           size="lg"
-          loading={saving}
+          loading={saving || ytImporting}
+          disabled={ytImporting}
           onClick={handleSave}
         >
           {audioFiles.length > 0
@@ -1328,6 +1358,116 @@ export default function NewSongPage() {
           }
         </Button>
       </div>
+
+      {/* YouTube import progress modal */}
+      {ytImporting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl space-y-6">
+            <div className="text-center space-y-2">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+                <svg className="h-7 w-7 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-bold text-foreground">מייבא שיר מ-YouTube</h2>
+              <p className="text-sm text-text-muted">התהליך עשוי לקחת 2-3 דקות</p>
+            </div>
+
+            <div className="space-y-3">
+              {YT_IMPORT_STEPS.map((step, idx) => {
+                const isCompleted = ytImportStepIndex > idx
+                const isActive = ytImportStepIndex === idx
+                const isPending = ytImportStepIndex < idx
+
+                return (
+                  <div
+                    key={step.key}
+                    className={[
+                      'flex items-center gap-3 rounded-xl px-4 py-3 transition-all',
+                      isActive ? 'bg-primary/5 border border-primary/20' : '',
+                      isCompleted ? 'opacity-70' : '',
+                      isPending ? 'opacity-40' : '',
+                    ].join(' ')}
+                  >
+                    {/* Status icon */}
+                    <div className="shrink-0">
+                      {isCompleted && (
+                        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-success/15">
+                          <svg className="h-4 w-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                      )}
+                      {isActive && (
+                        <div className="flex h-7 w-7 items-center justify-center">
+                          <div className="h-5 w-5 animate-spin rounded-full border-[2.5px] border-primary border-t-transparent" />
+                        </div>
+                      )}
+                      {isPending && (
+                        <div className="flex h-7 w-7 items-center justify-center">
+                          <div className="h-2.5 w-2.5 rounded-full bg-border" />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Step label */}
+                    <span className={[
+                      'text-sm font-medium',
+                      isActive ? 'text-primary' : 'text-foreground',
+                    ].join(' ')}>
+                      {step.label}
+                    </span>
+                  </div>
+                )
+              })}
+
+              {/* All done indicator */}
+              {ytImportStepIndex >= YT_IMPORT_STEPS.length && !ytAudioSkipped && (
+                <div className="flex items-center gap-3 rounded-xl bg-success/5 border border-success/20 px-4 py-3">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-success/15">
+                    <svg className="h-4 w-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <span className="text-sm font-medium text-success">הושלם! מעביר לשיר...</span>
+                </div>
+              )}
+
+              {/* Audio skipped — song created without audio */}
+              {ytImportStepIndex >= YT_IMPORT_STEPS.length && ytAudioSkipped && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3 rounded-xl bg-warning/5 border border-warning/20 px-4 py-3">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-warning/15">
+                      <svg className="h-4 w-4 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <span className="text-sm font-medium text-foreground">השיר נוצר עם המילים!</span>
+                      <p className="text-xs text-text-muted">YouTube חסם הורדת שמע. ניתן להעלות קבצי שמע ידנית בדף השיר.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Progress bar */}
+            <div className="space-y-1.5">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-border/30">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-700 ease-out"
+                  style={{
+                    width: `${Math.min(100, ((ytImportStepIndex + 1) / YT_IMPORT_STEPS.length) * 100)}%`,
+                  }}
+                />
+              </div>
+              <p className="text-center text-xs text-text-muted">
+                שלב {Math.min(ytImportStepIndex + 1, YT_IMPORT_STEPS.length)} מתוך {YT_IMPORT_STEPS.length}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
