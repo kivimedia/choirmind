@@ -262,12 +262,17 @@ export default function KaraokeMadnessPage() {
     setCountdown(3)
   }
 
-  // Switch to next difficulty level mid-game
+  // Switch difficulty level mid-game
   function handleNextLevel() {
-    const nextDifficulty = Math.min(difficulty + 1, 3) as 0 | 1 | 2 | 3
-    if (nextDifficulty === difficulty) return
-    startWithDifficulty(nextDifficulty)
-    // Keep playing — don't restart audio, just reassign words
+    const next = Math.min(difficulty + 1, 3) as 0 | 1 | 2 | 3
+    if (next === difficulty) return
+    startWithDifficulty(next)
+  }
+
+  function handlePrevLevel() {
+    const prev = Math.max(difficulty - 1, 0) as 0 | 1 | 2 | 3
+    if (prev === difficulty) return
+    startWithDifficulty(prev)
   }
 
   // Countdown
@@ -618,17 +623,28 @@ export default function KaraokeMadnessPage() {
           </div>
         </div>
 
-        {/* Fixed bottom: "Make it crazier" button */}
-        {difficulty < 3 && (
-          <div className="shrink-0 px-4 py-3">
-            <button
-              type="button"
-              onClick={handleNextLevel}
-              className="w-full rounded-xl bg-gradient-to-r from-rose-500 via-purple-500 to-indigo-500 px-6 py-3.5 text-lg font-black text-white shadow-lg shadow-purple-500/30 transition-transform hover:scale-[1.02] active:scale-95"
-              style={{ animation: 'crazier-pulse 2s ease-in-out infinite' }}
-            >
-              &#x1F525; {DIFFICULTY_LABELS[difficulty + 1]?.he} &#x2014; יאללה טירוף! &#x1F525;
-            </button>
+        {/* Fixed bottom: difficulty switch buttons */}
+        {(difficulty > 0 || difficulty < 3) && (
+          <div className="shrink-0 px-4 py-3 flex gap-2">
+            {difficulty > 0 && (
+              <button
+                type="button"
+                onClick={handlePrevLevel}
+                className="flex-1 rounded-xl border-2 border-sky-500/40 bg-sky-500/10 px-4 py-3 text-base font-bold text-sky-400 transition-transform hover:scale-[1.02] active:scale-95"
+              >
+                &#x2744;&#xFE0F; {DIFFICULTY_LABELS[difficulty - 1]?.he}
+              </button>
+            )}
+            {difficulty < 3 && (
+              <button
+                type="button"
+                onClick={handleNextLevel}
+                className="flex-1 rounded-xl bg-gradient-to-r from-rose-500 via-purple-500 to-indigo-500 px-4 py-3 text-base font-black text-white shadow-lg shadow-purple-500/30 transition-transform hover:scale-[1.02] active:scale-95"
+                style={{ animation: 'crazier-pulse 2s ease-in-out infinite' }}
+              >
+                &#x1F525; {DIFFICULTY_LABELS[difficulty + 1]?.he}
+              </button>
+            )}
             <style>{`
               @keyframes crazier-pulse {
                 0%, 100% { box-shadow: 0 4px 20px rgba(168, 85, 247, 0.3); }
