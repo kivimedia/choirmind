@@ -243,6 +243,35 @@ function sprinkleEveryone(
 }
 
 /**
+ * Sprinkle EVERYONE on individual words within lines (for levels 2-3).
+ * ~12% of individual words become EVERYONE for extra chaos.
+ */
+function sprinkleEveryoneWords(
+  lines: AssignedLine[],
+  rand: () => number,
+): AssignedLine[] {
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li]
+    if (line.words.length < 2) continue
+    // Skip lines that are already all-EVERYONE
+    if (line.words.every((w) => w.player === EVERYONE)) continue
+
+    let changed = false
+    const newWords = line.words.map((w) => {
+      if (w.player !== EVERYONE && rand() < 0.12) {
+        changed = true
+        return { ...w, player: EVERYONE }
+      }
+      return w
+    })
+    if (changed) {
+      lines[li] = { ...line, words: newWords }
+    }
+  }
+  return lines
+}
+
+/**
  * Level 1: Assign entire lines to random players.
  * Max 2 consecutive lines to the same player.
  */
@@ -341,7 +370,8 @@ function assignLevel2(
 
 /**
  * Level 3: Assign each word (or maqaf pair) to a random player.
- * Maximum switching for chaos.
+ * Maximum switching for chaos — but ~25% chance of giving 2 consecutive
+ * words to the same player for unpredictability.
  */
 function assignLevel3(
   wordTimestamps: WordTimestamp[][],
@@ -351,6 +381,7 @@ function assignLevel3(
   const result: AssignedLine[] = []
   const durations = new Array(playerCount).fill(0)
   let lastPlayer = -1
+  let samePlayerStreak = 0
 
   for (let lineIdx = 0; lineIdx < wordTimestamps.length; lineIdx++) {
     const lineWords = wordTimestamps[lineIdx]
@@ -363,8 +394,15 @@ function assignLevel3(
     const assignedWords: AssignedWord[] = []
 
     for (const group of groups) {
-      // In level 3, we force switching — never same player twice unless only 1 player
-      const player = pickBalancedPlayer(durations, lastPlayer, 1, 1, rand)
+      // ~25% chance of keeping the same player for 2 words in a row
+      const keepSame = samePlayerStreak === 0 && lastPlayer >= 0 && rand() < 0.25
+      const player = keepSame
+        ? lastPlayer
+        : pickBalancedPlayer(durations, lastPlayer, 1, 1, rand)
+
+      samePlayerStreak = player === lastPlayer ? samePlayerStreak + 1 : 0
+      // Cap at 2 consecutive, then force switch
+      if (samePlayerStreak >= 2) samePlayerStreak = 0
       lastPlayer = player
 
       for (const w of group) {
@@ -408,11 +446,13 @@ export function generateAssignments(
       lines = assignLevel2(wordTimestamps, playerCount, rand)
       lines = markChorusesAsEveryone(lines, chunkInfos)
       lines = sprinkleEveryone(lines, rand)
+      lines = sprinkleEveryoneWords(lines, rand)
       break
     case 3:
       lines = assignLevel3(wordTimestamps, playerCount, rand)
       lines = markChorusesAsEveryone(lines, chunkInfos)
       lines = sprinkleEveryone(lines, rand)
+      lines = sprinkleEveryoneWords(lines, rand)
       break
   }
 
