@@ -9,7 +9,7 @@ interface TextAreaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
 }
 
 const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(
-  ({ label, error, rows = 5, dir = 'auto', className = '', id, ...rest }, ref) => {
+  ({ label, error, rows = 5, dir = 'rtl', className = '', id, ...rest }, ref) => {
     const generatedId = useId()
     const textareaId = id ?? generatedId
     const errorId = error ? `${textareaId}-error` : undefined

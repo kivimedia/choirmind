@@ -946,7 +946,6 @@ export default function NewSongPage() {
                   onChange={(e) =>
                     updateManualChunk(index, 'label', e.target.value)
                   }
-                  dir="auto"
                 />
               </div>
               <div className="w-28 sm:w-36">
@@ -991,7 +990,6 @@ export default function NewSongPage() {
               onChange={(e) =>
                 updateManualChunk(index, 'lyrics', e.target.value)
               }
-              dir="auto"
             />
           </div>
         </Card>

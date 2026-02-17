@@ -316,7 +316,6 @@ export default function OnboardingPage() {
                   placeholder="שם המקהלה שלכם..."
                   value={choirName}
                   onChange={(e) => setChoirName(e.target.value)}
-                  dir="auto"
                 />
               )}
             </div>

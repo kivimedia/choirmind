@@ -336,6 +336,7 @@ export default function KaraokeMadnessPage() {
                     next[i] = e.target.value
                     setPlayerNames(next)
                   }}
+                  dir="rtl"
                   className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-text-muted"
                 />
               </div>

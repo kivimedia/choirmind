@@ -650,12 +650,12 @@ export default function EditSongPage() {
       {/* Song metadata */}
       <Card className="!p-6 space-y-4">
         <h2 className="text-lg font-semibold text-foreground">פרטי השיר</h2>
-        <Input label="שם השיר" value={title} onChange={(e) => setTitle(e.target.value)} dir="auto" />
+        <Input label="שם השיר" value={title} onChange={(e) => setTitle(e.target.value)} />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Input label="מלחין" value={composer} onChange={(e) => setComposer(e.target.value)} dir="auto" />
-          <Input label="משורר / כותב מילים" value={lyricist} onChange={(e) => setLyricist(e.target.value)} dir="auto" />
+          <Input label="מלחין" value={composer} onChange={(e) => setComposer(e.target.value)} />
+          <Input label="משורר / כותב מילים" value={lyricist} onChange={(e) => setLyricist(e.target.value)} />
         </div>
-        <Input label="מעבד" value={arranger} onChange={(e) => setArranger(e.target.value)} dir="auto" />
+        <Input label="מעבד" value={arranger} onChange={(e) => setArranger(e.target.value)} />
         {/* YouTube URL / Video ID (primary) */}
         <div className="space-y-3">
           <div className="flex items-end gap-2">
@@ -835,7 +835,6 @@ export default function EditSongPage() {
               <Input
                 value={chunk.label}
                 onChange={(e) => updateChunkLabel(idx, e.target.value)}
-                dir="auto"
                 placeholder="תווית (בית 1, פזמון...)"
               />
               {chunk.lineTimestamps && (
@@ -847,7 +846,6 @@ export default function EditSongPage() {
             <TextArea
               value={chunk.lyrics}
               onChange={(e) => updateChunkLyrics(idx, e.target.value)}
-              dir="auto"
               rows={Math.max(3, chunk.lyrics.split('\n').length + 1)}
               placeholder="מילות הקטע..."
             />
@@ -1201,7 +1199,6 @@ export default function EditSongPage() {
           <TextArea
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
-            dir="auto"
             rows={12}
             placeholder={"בית 1\nשורה ראשונה של הבית\nשורה שנייה\n\nפזמון\nשורה ראשונה של הפזמון\nשורה שנייה\n\nבית 2\n..."}
           />

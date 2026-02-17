@@ -288,7 +288,6 @@ export default function ChoirManagePage() {
             label={t('choirName')}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            dir="auto"
           />
 
           <div>
