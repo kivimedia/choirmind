@@ -175,8 +175,17 @@ export function useAudioEngine(options: UseAudioEngineOptions): AudioEngineState
         setIsPlaying(false)
       },
       onend: () => {
+        // Report final position before stopping polling, so consumers
+        // (e.g. KaraokeMadness end-of-song detection) get the last timestamp.
+        const dur = howl.duration() * 1000
+        if (dur > 0) {
+          setCurrentTimeMs(dur)
+          currentTimeMsRef.current = dur
+          onTimeUpdateRef.current?.(dur)
+        } else {
+          setCurrentTimeMs(0)
+        }
         setIsPlaying(false)
-        setCurrentTimeMs(0)
       },
     })
 

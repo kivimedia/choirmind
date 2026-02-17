@@ -846,22 +846,29 @@ export default function KaraokeMadnessPage() {
               <span className="text-lg leading-none">{audioMode === 'karaoke' ? '\u{1F3B5}' : '\u{1F3A4}'}</span>
               <span>{audioMode === 'karaoke' ? 'קריוקי' : '+שירה'}</span>
             </button>
-            {/* Crazy lyrics toggle (only if generated) */}
-            {crazyWords && (
-              <button
-                type="button"
-                onClick={() => setCrazyLyrics(!crazyLyrics)}
-                className={[
-                  'shrink-0 flex flex-col items-center gap-0.5 rounded-xl px-4 py-2 text-xs font-bold transition-all border-2',
-                  crazyLyrics
+            {/* Crazy lyrics: toggle if generated, generate if not */}
+            <button
+              type="button"
+              disabled={crazyLoading}
+              onClick={() => {
+                if (crazyWords) {
+                  setCrazyLyrics(!crazyLyrics)
+                } else {
+                  handleGenerateCrazyLyrics()
+                }
+              }}
+              className={[
+                'shrink-0 flex flex-col items-center gap-0.5 rounded-xl px-4 py-2 text-xs font-bold transition-all border-2',
+                crazyLoading
+                  ? 'border-amber-400/30 bg-amber-500/10 text-amber-300/50 animate-pulse'
+                  : crazyLyrics && crazyWords
                     ? 'border-amber-400/50 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
                     : 'border-white/10 bg-white/5 text-white/40 hover:bg-white/10',
-                ].join(' ')}
-              >
-                <span className="text-lg leading-none">{'\u{1F92A}'}</span>
-                <span>{'\u05DE\u05D8\u05D5\u05E8\u05E3'}</span>
-              </button>
-            )}
+              ].join(' ')}
+            >
+              <span className="text-lg leading-none">{crazyLoading ? '\u{23F3}' : '\u{1F92A}'}</span>
+              <span>{crazyLoading ? '\u05D9\u05D5\u05E6\u05E8...' : '\u05DE\u05D8\u05D5\u05E8\u05E3'}</span>
+            </button>
             {/* Super Madness toggle */}
             <button
               type="button"

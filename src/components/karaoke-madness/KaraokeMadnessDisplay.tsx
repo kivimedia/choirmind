@@ -62,12 +62,21 @@ export default function KaraokeMadnessDisplay({
     return lines[activeLineIdx]?.words[activeWordIdx]?.player ?? -1
   }, [lines, activeLineIdx, activeWordIdx])
 
-  // Auto-scroll active line into view
+  // Auto-scroll active line into view (or first line on mount)
+  const hasScrolledInitially = useRef(false)
   useEffect(() => {
-    if (activeLineIdx < 0 || !containerRef.current) return
-    const lineEl = containerRef.current.children[activeLineIdx] as HTMLElement | undefined
-    lineEl?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }, [activeLineIdx])
+    if (!containerRef.current) return
+    if (activeLineIdx >= 0) {
+      const lineEl = containerRef.current.children[activeLineIdx] as HTMLElement | undefined
+      lineEl?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      hasScrolledInitially.current = true
+    } else if (!hasScrolledInitially.current && lines.length > 0) {
+      // Before song starts, scroll first line to center
+      const firstEl = containerRef.current.children[0] as HTMLElement | undefined
+      firstEl?.scrollIntoView({ behavior: 'auto', block: 'center' })
+      hasScrolledInitially.current = true
+    }
+  }, [activeLineIdx, lines.length])
 
   const activeLineColor = getColor(activePlayer)
 
@@ -76,7 +85,7 @@ export default function KaraokeMadnessDisplay({
       ref={containerRef}
       dir={isRTL ? 'rtl' : 'ltr'}
       className="text-center"
-      style={{ fontSize: 'clamp(24px, 7vw, 42px)', lineHeight: 1.8 }}
+      style={{ fontSize: 'clamp(24px, 7vw, 42px)', lineHeight: 1.8, paddingTop: '35vh', paddingBottom: '35vh' }}
     >
       {lines.map((line, lineIdx) => {
         const isPast = lineIdx < activeLineIdx
@@ -111,6 +120,7 @@ export default function KaraokeMadnessDisplay({
               isPast ? 'opacity-20' : '',
               isUpcomingLine ? 'opacity-60' : '',
               !isPast && !isActiveLine && !isUpcomingLine && activeLineIdx >= 0 ? 'opacity-30' : '',
+              activeLineIdx < 0 ? 'opacity-50' : '',
               isActiveLine ? 'scale-[1.03]' : '',
             ].join(' ')}
             style={lineGlowStyle}

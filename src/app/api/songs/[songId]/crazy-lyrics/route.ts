@@ -3,6 +3,13 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 
+const LANG_NAMES: Record<string, string> = {
+  he: 'Hebrew (עברית)',
+  en: 'English',
+  fr: 'French',
+  mixed: 'Hebrew (עברית)',
+}
+
 // POST /api/songs/[songId]/crazy-lyrics — generate absurd alternative lyrics
 export async function POST(
   request: NextRequest,
@@ -17,10 +24,8 @@ export async function POST(
     const { songId } = await params
     const userId = session.user.id
 
+    const anthropicKey = process.env.ANTHROPIC_API_KEY
     const vocalServiceUrl = process.env.VOCAL_SERVICE_URL
-    if (!vocalServiceUrl) {
-      return NextResponse.json({ error: 'Vocal service not configured' }, { status: 500 })
-    }
 
     // Fetch song with chunks
     const song = await prisma.song.findUnique({
@@ -67,21 +72,98 @@ export async function POST(
       return NextResponse.json({ error: 'Song has no word timestamps' }, { status: 400 })
     }
 
-    // Call vocal service
-    const res = await fetch(`${vocalServiceUrl}/api/v1/crazy-lyrics`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lines, language: song.language }),
-      signal: AbortSignal.timeout(30000),
-    })
+    // Build compact prompt — just word counts per line + original text
+    const langName = LANG_NAMES[song.language] ?? LANG_NAMES['he']
+    const lineSpecs = lines.map((line, i) =>
+      `${i + 1}. [${line.length}w] ${line.join(' ')}`
+    ).join('\n')
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Failed to generate crazy lyrics' }))
-      return NextResponse.json({ error: err.detail || 'Crazy lyrics generation failed' }, { status: 502 })
+    const prompt = `Generate funny, absurd ${langName} replacement lyrics.
+
+RULES:
+1. Each line MUST have EXACTLY the same number of words as the original
+2. Be silly and fun — food, animals, aliens, everyday objects
+3. Family-friendly, grammatically coherent enough to sing
+4. Do NOT reuse original words
+
+LINES (number, [word count], original):
+${lineSpecs}
+
+Respond with ONLY a JSON array of arrays. Example: [["w1","w2"],["w3","w4","w5"]]
+Empty lines = [].`
+
+    let result: string[][]
+
+    if (anthropicKey) {
+      // Fast path: call Claude Haiku directly (no Modal roundtrip)
+      const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': anthropicKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 2000,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+        signal: AbortSignal.timeout(20000),
+      })
+
+      if (!anthropicRes.ok) {
+        const err = await anthropicRes.text().catch(() => 'API error')
+        console.error('[crazy-lyrics] Anthropic API error:', err)
+        return NextResponse.json({ error: 'AI generation failed' }, { status: 502 })
+      }
+
+      const anthropicData = await anthropicRes.json()
+      const text = anthropicData.content?.[0]?.text?.trim() ?? ''
+      const jsonMatch = text.match(/\[[\s\S]*\]/)
+      if (!jsonMatch) {
+        return NextResponse.json({ error: 'Failed to parse AI response' }, { status: 502 })
+      }
+      result = JSON.parse(jsonMatch[0])
+    } else if (vocalServiceUrl) {
+      // Fallback: go through vocal service (has its own Anthropic key)
+      const res = await fetch(`${vocalServiceUrl}/api/v1/crazy-lyrics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lines, language: song.language }),
+        signal: AbortSignal.timeout(30000),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Generation failed' }))
+        return NextResponse.json({ error: err.detail || 'Generation failed' }, { status: 502 })
+      }
+      const data = await res.json()
+      result = data.crazy_lines
+    } else {
+      return NextResponse.json({ error: 'No AI service configured' }, { status: 500 })
     }
 
-    const data = await res.json()
-    return NextResponse.json({ crazyLines: data.crazy_lines })
+    // Validate and fix structure
+    const validated: string[][] = []
+    for (let i = 0; i < lines.length; i++) {
+      const original = lines[i]
+      const crazy = result[i]
+      if (!crazy || !Array.isArray(crazy)) {
+        validated.push(original)
+      } else if (crazy.length === original.length) {
+        validated.push(crazy.map(String))
+      } else if (crazy.length > original.length) {
+        validated.push(crazy.slice(0, original.length).map(String))
+      } else {
+        // Pad with original words
+        const padded = crazy.map(String)
+        while (padded.length < original.length) {
+          padded.push(original[padded.length])
+        }
+        validated.push(padded)
+      }
+    }
+
+    return NextResponse.json({ crazyLines: validated })
   } catch (error) {
     console.error('POST /api/songs/[songId]/crazy-lyrics error:', error)
     return NextResponse.json({ error: 'Crazy lyrics generation failed' }, { status: 500 })
