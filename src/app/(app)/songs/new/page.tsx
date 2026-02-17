@@ -1079,7 +1079,6 @@ export default function NewSongPage() {
                   label="YouTube URL / Video ID"
                   value={youtubeInput}
                   onChange={(e) => handleYoutubeInput(e.target.value)}
-                  dir="auto"
                   placeholder="הדביקו קישור YouTube או מזהה וידאו"
                 />
               </div>
