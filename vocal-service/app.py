@@ -123,6 +123,12 @@ class SeparateStemsRequest(BaseModel):
     s3_key: str
 
 
+class CompressAudioRequest(BaseModel):
+    s3_key: str
+    target_format: str = "mp3"  # mp3, ogg, m4a
+    bitrate: str = "64k"
+
+
 # ---------------------------------------------------------------------------
 # Database helpers
 # ---------------------------------------------------------------------------
@@ -1241,6 +1247,64 @@ async def prepare_reference(req: PrepareReferenceRequest):
             logger.error("Failed to update reference status: %s", inner_exc)
 
         raise HTTPException(status_code=500, detail=error_msg[:500])
+
+
+# ---------------------------------------------------------------------------
+# Audio compression endpoint (for Whisper API 25MB limit)
+# ---------------------------------------------------------------------------
+
+
+@web_app.post("/api/v1/compress-audio")
+async def compress_audio(req: CompressAudioRequest):
+    """Compress an S3 audio file to a smaller format (MP3/OGG).
+    Used to get large WAV files under Whisper's 25MB limit.
+    Returns a new S3 URL for the compressed file.
+    """
+    import subprocess
+
+    logger.info("compress-audio: s3_key=%s format=%s bitrate=%s", req.s3_key, req.target_format, req.bitrate)
+
+    allowed_formats = {"mp3", "ogg", "m4a"}
+    if req.target_format not in allowed_formats:
+        raise HTTPException(status_code=400, detail=f"Unsupported format: {req.target_format}")
+
+    try:
+        # Download from S3
+        src_ext = req.s3_key.rsplit(".", 1)[-1] if "." in req.s3_key else "wav"
+        with tempfile.NamedTemporaryFile(suffix=f".{src_ext}", delete=False) as tmp:
+            src_path = tmp.name
+        _download_from_s3(req.s3_key, src_path)
+
+        # Compress with ffmpeg — mono 16kHz is plenty for Whisper
+        out_path = src_path.rsplit(".", 1)[0] + f".{req.target_format}"
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", src_path, "-ac", "1", "-ar", "16000", "-b:a", req.bitrate, out_path],
+            check=True, capture_output=True, timeout=120,
+        )
+        os.unlink(src_path)
+
+        compressed_size = os.path.getsize(out_path)
+        logger.info("compress-audio: compressed to %s (%.1fMB)", req.target_format, compressed_size / 1024 / 1024)
+
+        # Upload compressed version
+        base_key = req.s3_key.rsplit(".", 1)[0]
+        compressed_key = f"{base_key}_whisper.{req.target_format}"
+        content_type = {"mp3": "audio/mpeg", "ogg": "audio/ogg", "m4a": "audio/mp4"}.get(req.target_format, "audio/mpeg")
+        compressed_url = _upload_to_s3(out_path, compressed_key, content_type=content_type)
+        os.unlink(out_path)
+
+        return {
+            "compressed_s3_key": compressed_key,
+            "compressed_url": compressed_url,
+            "size_bytes": compressed_size,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        error_msg = f"{type(exc).__name__}: {exc}"
+        logger.error("compress-audio failed: %s", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg[:300])
 
 
 # ---------------------------------------------------------------------------

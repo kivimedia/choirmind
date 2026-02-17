@@ -86,12 +86,47 @@ export async function POST(
       return NextResponse.json({ error: 'Failed to download audio file' }, { status: 502 })
     }
 
-    const audioBuffer = await audioRes.arrayBuffer()
-    const audioBlob = new Blob([audioBuffer])
+    let audioBuffer = await audioRes.arrayBuffer()
+    let urlPath = new URL(audioTrack.fileUrl).pathname
+    let ext = urlPath.split('.').pop() || 'mp3'
 
-    // Determine file extension from URL
-    const urlPath = new URL(audioTrack.fileUrl).pathname
-    const ext = urlPath.split('.').pop() || 'mp3'
+    const WHISPER_MAX_BYTES = 24 * 1024 * 1024 // 24MB (safe margin under 25MB)
+
+    // If file is too large for Whisper, compress it via the vocal service
+    if (audioBuffer.byteLength > WHISPER_MAX_BYTES) {
+      console.log(`[auto-sync] File too large (${(audioBuffer.byteLength / 1024 / 1024).toFixed(1)}MB), compressing...`)
+      const vocalServiceUrl = process.env.VOCAL_SERVICE_URL
+      if (!vocalServiceUrl) {
+        return NextResponse.json({ error: 'Vocal service not configured — cannot compress large audio' }, { status: 500 })
+      }
+
+      // Extract S3 key from the URL
+      const s3Key = urlPath.startsWith('/') ? urlPath.slice(1) : urlPath
+      const compressRes = await fetch(`${vocalServiceUrl}/api/v1/compress-audio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ s3_key: s3Key, target_format: 'mp3', bitrate: '64k' }),
+        signal: AbortSignal.timeout(120000),
+      })
+
+      if (!compressRes.ok) {
+        const err = await compressRes.json().catch(() => ({ detail: 'Compression failed' }))
+        return NextResponse.json({ error: `Failed to compress audio: ${err.detail}` }, { status: 502 })
+      }
+
+      const { compressed_url } = await compressRes.json()
+      console.log(`[auto-sync] Compressed audio ready, downloading...`)
+
+      const compressedRes = await fetch(compressed_url, { signal: AbortSignal.timeout(30000) })
+      if (!compressedRes.ok) {
+        return NextResponse.json({ error: 'Failed to download compressed audio' }, { status: 502 })
+      }
+      audioBuffer = await compressedRes.arrayBuffer()
+      ext = 'mp3'
+      console.log(`[auto-sync] Compressed to ${(audioBuffer.byteLength / 1024 / 1024).toFixed(1)}MB`)
+    }
+
+    const audioBlob = new Blob([audioBuffer])
     const filename = `audio.${ext}`
 
     // Create a File object for the OpenAI SDK
