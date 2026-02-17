@@ -136,22 +136,30 @@ export default function KaraokeMadnessPage() {
   const effectiveAudioTracks = useMemo((): AudioTrackData[] => {
     if (!song) return []
     const refs = song.referenceVocals ?? []
+    const tracks = song.audioTracks ?? []
 
     if (audioMode === 'karaoke') {
-      // Find accompaniment track (instrumental / karaoke)
-      const match = refs.find((r) => r.accompanimentFileUrl)
-      if (match?.accompanimentFileUrl) {
+      // First check referenceVocals for accompaniment (from Demucs isolation)
+      const refMatch = refs.find((r) => r.accompanimentFileUrl)
+      if (refMatch?.accompanimentFileUrl) {
         return [{
-          id: `karaoke-${match.id}`,
+          id: `karaoke-${refMatch.id}`,
           songId: song.id,
           voicePart: 'playback' as VoicePart,
-          fileUrl: match.accompanimentFileUrl,
+          fileUrl: refMatch.accompanimentFileUrl,
         }]
+      }
+      // Then check audioTracks for a playback track (from YouTube stem separation)
+      const playbackTrack = tracks.find((t) => t.voicePart === 'playback')
+      if (playbackTrack) {
+        return [playbackTrack]
       }
     }
 
-    // Default: full mix
-    return song.audioTracks ?? []
+    // Default: full mix — prefer 'full' track, fallback to all tracks
+    const fullTrack = tracks.find((t) => t.voicePart === 'full')
+    if (fullTrack) return [fullTrack]
+    return tracks
   }, [song, audioMode])
 
   const handleTimeUpdate = useCallback((ms: number) => {
@@ -429,15 +437,50 @@ export default function KaraokeMadnessPage() {
         <div className="flex gap-3 mb-8">
           {effectiveNames.map((name, i) => (
             <div key={i} className="flex items-center gap-1.5">
-              <div className={`h-3 w-3 rounded-full ${PLAYER_COLORS[i].bg}`} />
-              <span className="text-sm text-foreground">{name}</span>
+              <div className={`h-4 w-4 rounded-full ${PLAYER_COLORS[i].bg}`} />
+              <span className="text-sm font-medium text-foreground">{name}</span>
             </div>
           ))}
         </div>
 
-        <div className="text-8xl font-black text-primary animate-pulse">
-          {countdown > 0 ? countdown : '!'}
+        {/* Animated countdown number */}
+        <div className="relative">
+          <div
+            key={countdown}
+            className="text-9xl font-black text-primary"
+            style={{
+              animation: 'countdown-pop 0.9s ease-out',
+              textShadow: `0 0 40px ${PLAYER_COLORS[0].hex}40, 0 0 80px ${PLAYER_COLORS[0].hex}20`,
+            }}
+          >
+            {countdown > 0 ? countdown : '!'}
+          </div>
+          {/* Ripple ring */}
+          <div
+            key={`ring-${countdown}`}
+            className="absolute inset-0 flex items-center justify-center pointer-events-none"
+            style={{ animation: 'countdown-ring 0.9s ease-out' }}
+          >
+            <div className="h-32 w-32 rounded-full border-4 border-primary/30" />
+          </div>
         </div>
+
+        <p className="mt-6 text-sm text-text-muted">
+          {DIFFICULTY_LABELS[difficulty].he} &middot; {playerCount} {effectiveNames.length > 0 ? 'שחקנים' : ''}
+        </p>
+
+        <style>{`
+          @keyframes countdown-pop {
+            0% { transform: scale(0.3); opacity: 0; }
+            40% { transform: scale(1.15); opacity: 1; }
+            70% { transform: scale(0.95); }
+            100% { transform: scale(1); opacity: 0.7; }
+          }
+          @keyframes countdown-ring {
+            0% { transform: scale(0.5); opacity: 0.8; }
+            100% { transform: scale(2.5); opacity: 0; }
+          }
+        `}</style>
       </div>
     )
   }
@@ -490,54 +533,79 @@ export default function KaraokeMadnessPage() {
 
   // -- End screen --
   if (phase === 'ended' && assignment && gameStats) {
+    const totalWords = gameStats.wordCounts.reduce((a: number, b: number) => a + b, 0)
+    // Find the player who sang the most
+    const winnerIdx = gameStats.wordCounts.indexOf(Math.max(...gameStats.wordCounts))
+    const winnerColor = PLAYER_COLORS[winnerIdx]
+
     return (
       <div dir="rtl" className="mx-auto max-w-lg space-y-6 text-start py-8">
-        <div className="text-center">
-          <h1 className="text-3xl font-black text-foreground">סיום!</h1>
+        {/* Animated title */}
+        <div className="text-center" style={{ animation: 'end-fade-in 0.6s ease-out' }}>
+          <h1
+            className="text-4xl font-black text-foreground"
+            style={{ animation: 'end-bounce 0.8s ease-out' }}
+          >
+            &#127881; סיום! &#127881;
+          </h1>
           <p className="text-lg text-text-muted mt-1">{song.title}</p>
         </div>
 
-        {/* Fun stats */}
-        <Card className="!p-5 space-y-4">
-          <h3 className="text-base font-semibold text-foreground text-center">סטטיסטיקות</h3>
-
-          {/* Most words */}
-          <div className="text-center">
-            <p className="text-sm text-text-muted">הכי הרבה מילים:</p>
-            <p className="text-xl font-bold text-primary">
-              {gameStats.mostWords.name} ({gameStats.mostWords.count} מילים)
+        {/* Winner spotlight */}
+        <div style={{ animation: 'end-fade-in 0.8s ease-out 0.2s both' }}>
+          <Card className="!p-5 text-center">
+            <p className="text-sm text-text-muted mb-1">&#127942; הכי הרבה מילים</p>
+            <p className="text-2xl font-black" style={{ color: winnerColor.hex }}>
+              {gameStats.mostWords.name}
             </p>
-          </div>
+            <p className="text-sm text-text-muted mt-1">
+              {gameStats.mostWords.count} מילים
+            </p>
+          </Card>
+        </div>
 
-          {/* Per-player breakdown */}
-          <div className="space-y-2">
+        {/* Per-player breakdown */}
+        <div style={{ animation: 'end-fade-in 0.8s ease-out 0.4s both' }}>
+        <Card className="!p-5 space-y-3">
+          <h3 className="text-base font-semibold text-foreground text-center">&#128202; סטטיסטיקות</h3>
+          <div className="space-y-3">
             {effectiveNames.map((name, i) => {
               const words = gameStats.wordCounts[i] || 0
               const durationSec = Math.round((gameStats.totalDurationMs[i] || 0) / 1000)
-              const totalWords = gameStats.wordCounts.reduce((a: number, b: number) => a + b, 0)
               const pct = totalWords > 0 ? Math.round((words / totalWords) * 100) : 0
 
               return (
-                <div key={i} className="flex items-center gap-3">
-                  <div className={`h-3 w-3 rounded-full shrink-0 ${PLAYER_COLORS[i].bg}`} />
-                  <span className="text-sm font-medium text-foreground w-20 truncate">{name}</span>
-                  <div className="flex-1 h-3 rounded-full bg-surface-hover overflow-hidden">
+                <div key={i} className="space-y-1">
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <div className={`h-3.5 w-3.5 rounded-full shrink-0 ${PLAYER_COLORS[i].bg}`} />
+                      <span className="font-medium text-foreground">{name}</span>
+                    </div>
+                    <span className="text-text-muted text-xs">
+                      {words} מילים &middot; {durationSec}s
+                    </span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-surface-hover overflow-hidden">
                     <div
-                      className={`h-full rounded-full ${PLAYER_COLORS[i].bg} transition-all`}
-                      style={{ width: `${pct}%` }}
+                      className={`h-full rounded-full ${PLAYER_COLORS[i].bg}`}
+                      style={{
+                        width: `${pct}%`,
+                        animation: `bar-grow 1s ease-out ${0.5 + i * 0.15}s both`,
+                      }}
                     />
                   </div>
-                  <span className="text-xs text-text-muted shrink-0">
-                    {words} ({durationSec}s)
-                  </span>
                 </div>
               )
             })}
           </div>
         </Card>
+        </div>
 
         {/* Actions */}
-        <div className="flex gap-3">
+        <div
+          className="flex gap-3"
+          style={{ animation: 'end-fade-in 0.8s ease-out 0.6s both' }}
+        >
           <Button
             variant="primary"
             className="flex-1"
@@ -547,7 +615,7 @@ export default function KaraokeMadnessPage() {
               setCurrentTimeMs(0)
             }}
           >
-            שחקו שוב
+            &#128260; שחקו שוב
           </Button>
           <Button
             variant="outline"
@@ -560,7 +628,7 @@ export default function KaraokeMadnessPage() {
               setDifficulty(1)
             }}
           >
-            שנו הגדרות
+            &#9881;&#65039; שנו הגדרות
           </Button>
         </div>
         <Button
@@ -568,8 +636,23 @@ export default function KaraokeMadnessPage() {
           className="w-full"
           onClick={() => router.push('/songs')}
         >
-          בחרו שיר אחר
+          &#127925; בחרו שיר אחר
         </Button>
+
+        <style>{`
+          @keyframes end-fade-in {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+          @keyframes end-bounce {
+            0% { transform: scale(0.5); opacity: 0; }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); opacity: 1; }
+          }
+          @keyframes bar-grow {
+            from { width: 0%; }
+          }
+        `}</style>
       </div>
     )
   }

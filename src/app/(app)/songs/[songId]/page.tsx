@@ -95,6 +95,7 @@ export default function SongDetailPage() {
   const tChunks = useTranslations('chunks')
   const tPractice = useTranslations('practice')
   const tGames = useTranslations('games')
+  const tKaraoke = useTranslations('karaokeMadness')
   const tCommon = useTranslations('common')
   const tAudio = useTranslations('audio')
 
@@ -346,8 +347,13 @@ export default function SongDetailPage() {
             &#127908; הקלטת שיר מלא
           </Button>
         )}
-        <Link href={`/games/${songId}`}>
+        <Link href={`/karaoke-madness/${songId}`}>
           <Button variant="secondary" size="lg">
+            &#127908; {tKaraoke('title')}
+          </Button>
+        </Link>
+        <Link href={`/games/${songId}`}>
+          <Button variant="outline" size="lg">
             &#127918; {tGames('title')}
           </Button>
         </Link>

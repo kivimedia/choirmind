@@ -48,12 +48,21 @@ export default function KaraokeMadnessDisplay({
     return { activeLineIdx: foundLine, activeWordIdx: foundWord }
   }, [lines, currentTimeMs, latencyOffsetMs])
 
+  // Current active player for the active word
+  const activePlayer = useMemo(() => {
+    if (activeLineIdx < 0 || activeWordIdx < 0) return -1
+    return lines[activeLineIdx]?.words[activeWordIdx]?.player ?? -1
+  }, [lines, activeLineIdx, activeWordIdx])
+
   // Auto-scroll active line into view
   useEffect(() => {
     if (activeLineIdx < 0 || !containerRef.current) return
     const lineEl = containerRef.current.children[activeLineIdx] as HTMLElement | undefined
     lineEl?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [activeLineIdx])
+
+  // Active player's color for the line background highlight
+  const activeLineColor = activePlayer >= 0 ? PLAYER_COLORS[activePlayer] : null
 
   return (
     <div
@@ -65,15 +74,23 @@ export default function KaraokeMadnessDisplay({
       {lines.map((line, lineIdx) => {
         const isPast = lineIdx < activeLineIdx
         const isActiveLine = lineIdx === activeLineIdx
+        // For upcoming lines (next 2), show a subtle preview
+        const isUpcomingLine = !isPast && !isActiveLine &&
+          lineIdx <= activeLineIdx + 2 && activeLineIdx >= 0
 
         return (
           <p
             key={lineIdx}
             className={[
-              'mb-2 min-h-[2em] rounded-lg px-2 transition-all duration-300',
-              isActiveLine ? 'bg-white/5' : '',
-              isPast ? 'opacity-40' : '',
+              'mb-2 min-h-[2em] rounded-lg px-2 py-0.5 transition-all duration-500',
+              isPast ? 'opacity-30' : '',
+              isUpcomingLine ? 'opacity-70' : '',
+              !isPast && !isActiveLine && !isUpcomingLine && activeLineIdx >= 0 ? 'opacity-40' : '',
             ].join(' ')}
+            style={isActiveLine && activeLineColor ? {
+              backgroundColor: `${activeLineColor.hex}08`,
+              borderRight: `3px solid ${activeLineColor.hex}40`,
+            } : undefined}
           >
             {line.words.length === 0 ? (
               <span>&nbsp;</span>
@@ -85,6 +102,10 @@ export default function KaraokeMadnessDisplay({
                 const isWordPast = currentTimeMs >= adjustedEnd
                 const isWordUpcoming = currentTimeMs < adjustedStart &&
                   adjustedStart - currentTimeMs < 3000 // preview 3s ahead
+                // Next word indicator (1-2 words ahead on active line)
+                const isNextWord = isActiveLine && activeWordIdx >= 0 &&
+                  wordIdx > activeWordIdx && wordIdx <= activeWordIdx + 2 &&
+                  !isWordPast
 
                 const color = PLAYER_COLORS[word.player] || PLAYER_COLORS[0]
 
@@ -92,17 +113,23 @@ export default function KaraokeMadnessDisplay({
                   <span
                     key={wordIdx}
                     className={[
-                      'transition-all duration-150 inline-block',
+                      'inline-block transition-all',
+                      isCurrentWord ? 'duration-100' : 'duration-300',
                       isCurrentWord
-                        ? `${color.text} font-bold scale-110`
+                        ? `${color.text} font-bold`
                         : isWordPast
-                          ? `${color.text} opacity-60`
-                          : isWordUpcoming
-                            ? `${color.text} opacity-80`
-                            : `${color.text} opacity-50`,
+                          ? `${color.text} opacity-50`
+                          : isNextWord
+                            ? `${color.text} opacity-90`
+                            : isWordUpcoming
+                              ? `${color.text} opacity-70`
+                              : `${color.text} opacity-40`,
                     ].join(' ')}
                     style={isCurrentWord ? {
-                      textShadow: `0 0 12px ${color.hex}40`,
+                      textShadow: `0 0 20px ${color.hex}60, 0 0 40px ${color.hex}25`,
+                      transform: 'scale(1.12)',
+                    } : isNextWord ? {
+                      textShadow: `0 0 8px ${color.hex}20`,
                     } : undefined}
                   >
                     {word.word}
