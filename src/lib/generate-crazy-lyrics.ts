@@ -35,7 +35,7 @@ export async function generateCrazyLyrics(
 
 RULES:
 1. Each line MUST have EXACTLY the same number of words as the original
-2. Be silly and fun — food, animals, aliens, everyday objects
+2. If the original lyrics are emotional or dramatic, make replacements aggressively mundane (grocery lists, plumbing problems, parking tickets). If the original is casual, make replacements absurdly dramatic and epic.
 3. Family-friendly, grammatically coherent enough to sing
 4. Do NOT reuse original words
 
