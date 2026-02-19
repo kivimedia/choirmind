@@ -61,6 +61,27 @@ export const DISTRACTIONS: DistractionDef[] = [
   { id: 'screen-static', category: 'screen_effect', durationMs: 2000, position: 'center' },
   { id: 'matrix-rain', category: 'screen_effect', durationMs: 3500, position: 'center' },
   { id: 'heartbeat-pulse', category: 'screen_effect', durationMs: 3000, position: 'center' },
+  // Wacky illustrations (inspired by crazy lyrics scenarios)
+  { id: 'penguin-pizza', category: 'person', durationMs: 3500, position: 'side' },
+  { id: 'fish-couch-fight', category: 'animal', durationMs: 3500, position: 'bottom' },
+  { id: 'cat-mayor', category: 'animal', durationMs: 3000, position: 'center' },
+  { id: 'ceo-dog', category: 'animal', durationMs: 3500, position: 'side' },
+  { id: 'octopus-dress', category: 'animal', durationMs: 3000, position: 'random' },
+  { id: 'snail-chase', category: 'animal', durationMs: 4500, position: 'bottom' },
+  { id: 'banana-crisis', category: 'object', durationMs: 3000, position: 'random' },
+  { id: 'fridge-revolution', category: 'object', durationMs: 3500, position: 'center' },
+  { id: 'pizza-trial', category: 'person', durationMs: 3000, position: 'center' },
+  { id: 'toast-propose', category: 'object', durationMs: 3000, position: 'random' },
+  { id: 'alien-breakfast', category: 'person', durationMs: 3000, position: 'top' },
+  { id: 'sock-reunion', category: 'object', durationMs: 3000, position: 'center' },
+  { id: 'chair-diary', category: 'object', durationMs: 3500, position: 'bottom' },
+  { id: 'traffic-light-crisis', category: 'object', durationMs: 3000, position: 'top' },
+  { id: 'elevator-race', category: 'fake_ui', durationMs: 3000, position: 'side' },
+  { id: 'grandma-cook-battle', category: 'person', durationMs: 3500, position: 'bottom' },
+  { id: 'falafel-love', category: 'object', durationMs: 3000, position: 'center' },
+  { id: 'pigeon-complaint', category: 'animal', durationMs: 3000, position: 'top' },
+  { id: 'astronaut-milk', category: 'person', durationMs: 3500, position: 'random' },
+  { id: 'gps-lost', category: 'fake_ui', durationMs: 3000, position: 'top' },
   // Fake UI
   { id: 'low-battery', category: 'fake_ui', durationMs: 3000, position: 'top' },
   { id: 'incoming-call', category: 'fake_ui', durationMs: 3500, position: 'top' },
@@ -83,9 +104,9 @@ export function scheduleDistractions(
   const schedule: ScheduledDistraction[] = []
   const used = new Set<string>()
 
-  // Start after 10s, leave 5s at end
-  let time = 10000 + rand() * 5000
-  const endTime = songDurationMs - 5000
+  // Start after 5s, leave 3s at end
+  let time = 5000 + rand() * 3000
+  const endTime = songDurationMs - 3000
 
   while (time < endTime) {
     // Pick a random distraction (avoid repeats until all used)
@@ -122,11 +143,11 @@ export function scheduleDistractions(
 
     schedule.push({ def, startMs: Math.round(time), x, y })
 
-    // Gap between distractions: 5-15 seconds
+    // Rapid gaps: 1.5-5s early, 0.5-3s later — much more chaotic!
     const progress = time / songDurationMs
-    const minGap = progress > 0.6 ? 4000 : 6000
-    const maxGap = progress > 0.6 ? 10000 : 15000
-    time += minGap + rand() * (maxGap - minGap) + def.durationMs
+    const minGap = progress > 0.5 ? 500 : 1500
+    const maxGap = progress > 0.5 ? 3000 : 5000
+    time += minGap + rand() * (maxGap - minGap) + def.durationMs * 0.3
   }
 
   return schedule

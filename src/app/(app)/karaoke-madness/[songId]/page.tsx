@@ -877,8 +877,8 @@ export default function KaraokeMadnessPage() {
                     : 'border-white/10 bg-white/5 text-white/40 hover:bg-white/10',
               ].join(' ')}
             >
-              <span className="text-lg leading-none">{crazyLoading ? '\u{23F3}' : '\u{1F92A}'}</span>
-              <span>{crazyLoading ? '\u05D9\u05D5\u05E6\u05E8...' : '\u05DE\u05D8\u05D5\u05E8\u05E3'}</span>
+              <span className="text-lg leading-none">{crazyLoading ? '\u{23F3}' : '\u{1F923}'}</span>
+              <span>{crazyLoading ? '\u05D9\u05D5\u05E6\u05E8...' : '\u05DE\u05D9\u05DC\u05D9\u05DD'}</span>
             </button>
             {/* Super Madness toggle */}
             <button
@@ -891,8 +891,8 @@ export default function KaraokeMadnessPage() {
                   : 'border-white/10 bg-white/5 text-white/40 hover:bg-white/10',
               ].join(' ')}
             >
-              <span className="text-lg leading-none">{'\u{1F4A5}'}</span>
-              <span>{'\u05DB\u05D0\u05D5\u05E1'}</span>
+              <span className="text-lg leading-none">{'\u{1F3AD}'}</span>
+              <span>{'\u05D0\u05E0\u05D9\u05DE\u05E6\u05D9\u05D4'}</span>
             </button>
           </div>
         </div>
