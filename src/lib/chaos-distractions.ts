@@ -104,9 +104,9 @@ export function scheduleDistractions(
   const schedule: ScheduledDistraction[] = []
   const used = new Set<string>()
 
-  // Start after 5s, leave 3s at end
-  let time = 5000 + rand() * 3000
-  const endTime = songDurationMs - 3000
+  // Start after 8s, leave 4s at end
+  let time = 8000 + rand() * 4000
+  const endTime = songDurationMs - 4000
 
   while (time < endTime) {
     // Pick a random distraction (avoid repeats until all used)
@@ -143,11 +143,11 @@ export function scheduleDistractions(
 
     schedule.push({ def, startMs: Math.round(time), x, y })
 
-    // Rapid gaps: 1.5-5s early, 0.5-3s later — much more chaotic!
+    // Moderate gaps: builds up as song progresses
     const progress = time / songDurationMs
-    const minGap = progress > 0.5 ? 500 : 1500
-    const maxGap = progress > 0.5 ? 3000 : 5000
-    time += minGap + rand() * (maxGap - minGap) + def.durationMs * 0.3
+    const minGap = progress > 0.6 ? 2000 : 4000
+    const maxGap = progress > 0.6 ? 6000 : 10000
+    time += minGap + rand() * (maxGap - minGap) + def.durationMs * 0.5
   }
 
   return schedule

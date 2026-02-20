@@ -34,6 +34,9 @@ export interface PlayerAssignment {
   lines: AssignedLine[]
   playerCount: number
   difficulty: 0 | 1 | 2 | 3
+  /** Maps each line's lineIndex back to the original (pre-split) line index.
+   *  Used for crazy-lyrics substitution where crazyWords is indexed by original lines. */
+  originalLineIndices?: number[]
 }
 
 /** Info about each chunk so verse-by-verse can assign per chunk. */
@@ -418,18 +421,115 @@ function assignLevel3(
   return result
 }
 
+// ---------------------------------------------------------------------------
+// Smart line splitting — ported from karaoke-madness standalone app
+// ---------------------------------------------------------------------------
+
+/**
+ * Score each word boundary as a potential split point.
+ * Higher score = better place to split.
+ */
+function scoreSplitPoint(line: WordTimestamp[], index: number): number {
+  let score = 0
+  const wordCount = line.length
+  const mid = (wordCount - 1) / 2
+
+  // 1. Timing gap: largest pause between words (normalized, max 5 pts)
+  if (index < wordCount - 1) {
+    const gapMs = line[index + 1].startMs - line[index].endMs
+    score += Math.min(gapMs / 50, 5)
+  }
+
+  // 2. Punctuation: bonus if the word ends with sentence/clause punctuation
+  const word = line[index].word
+  if (/[,.!?;:]$/.test(word)) {
+    score += 4
+  }
+
+  // 3. Midpoint proximity: prefer balanced halves (max 3 points at exact center)
+  const distFromMid = Math.abs(index - mid) / mid // 0 at center, 1 at edges
+  score += 3 * (1 - distFromMid)
+
+  return score
+}
+
+/**
+ * Find the best split point in a line by scoring each word boundary.
+ * Returns the index of the last word in the first half.
+ */
+function findBestSplit(line: WordTimestamp[]): number {
+  let bestIndex = Math.floor(line.length / 2) - 1
+  let bestScore = -Infinity
+
+  // Don't allow splits that produce halves shorter than 2 words
+  const minHalf = 2
+  for (let i = minHalf - 1; i < line.length - minHalf; i++) {
+    const s = scoreSplitPoint(line, i)
+    if (s > bestScore) {
+      bestScore = s
+      bestIndex = i
+    }
+  }
+
+  return bestIndex
+}
+
+interface SplitResult {
+  lines: WordTimestamp[][]
+  /** Maps each split line index back to the original line index (before splitting). */
+  originalIndices: number[]
+}
+
+/**
+ * Split lines that exceed maxWords into shorter sub-lines.
+ * Uses a scoring-based algorithm that respects natural phrase breaks:
+ * - Prefers splitting at timing gaps (pauses between words)
+ * - Prefers splitting after punctuation
+ * - Prefers balanced halves (splits near the center)
+ * Recursively splits halves that are still too long.
+ *
+ * Returns both the split lines and a mapping from split index → original index.
+ */
+function splitLongLines(lines: WordTimestamp[][], maxWords: number): SplitResult {
+  const result: WordTimestamp[][] = []
+  const originalIndices: number[] = []
+
+  function splitRecursive(line: WordTimestamp[], origIdx: number) {
+    if (line.length <= maxWords) {
+      result.push(line)
+      originalIndices.push(origIdx)
+      return
+    }
+    const splitAt = findBestSplit(line)
+    const left = line.slice(0, splitAt + 1)
+    const right = line.slice(splitAt + 1)
+    splitRecursive(left, origIdx)
+    splitRecursive(right, origIdx)
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    splitRecursive(lines[i], i)
+  }
+  return { lines: result, originalIndices }
+}
+
+// ---------------------------------------------------------------------------
+
 /**
  * Main entry point: generate player assignments for Karaoke Madness.
  *
  * @param chunkInfos - Optional chunk boundaries for verse-by-verse mode and chorus detection.
  */
 export function generateAssignments(
-  wordTimestamps: WordTimestamp[][],
+  rawWordTimestamps: WordTimestamp[][],
   playerCount: 2 | 3 | 4 | 5 | 6,
   difficulty: 0 | 1 | 2 | 3,
   seed: number = Date.now(),
   chunkInfos?: ChunkInfo[],
 ): PlayerAssignment {
+  // Split long lines so nothing exceeds ~10 words on screen
+  const { lines: wordTimestamps, originalIndices } = splitLongLines(rawWordTimestamps, 10)
+
   const rand = createPRNG(seed)
 
   let lines: AssignedLine[]
@@ -457,7 +557,7 @@ export function generateAssignments(
       break
   }
 
-  return { lines, playerCount, difficulty }
+  return { lines, playerCount, difficulty, originalLineIndices: originalIndices }
 }
 
 /**

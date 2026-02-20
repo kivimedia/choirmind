@@ -363,12 +363,27 @@ export default function KaraokeMadnessPage() {
   // Apply crazy words to assignment if enabled
   const effectiveAssignment = useMemo(() => {
     if (!assignment || !crazyLyrics || !crazyWords) return assignment
-    // crazyWords is a flat array of lines (same order as mergeAllWordTimestamps)
-    // assignment.lines maps to the same flat lines via lineIndex
+    // crazyWords is indexed by ORIGINAL line indices (before smart splitting).
+    // assignment.originalLineIndices maps each split line back to its original line.
+    const origMap = assignment.originalLineIndices
     const newLines = assignment.lines.map((line) => {
-      const crazyLine = crazyWords[line.lineIndex]
+      // Use originalLineIndices if available, otherwise fall back to lineIndex
+      const origIdx = origMap ? origMap[line.lineIndex] : line.lineIndex
+      const crazyLine = crazyWords[origIdx]
+      if (!crazyLine) return line
+      // Figure out word offset within this original line (when a line is split into
+      // multiple sub-lines, each sub-line is a slice of the original)
+      let wordOffset = 0
+      if (origMap) {
+        // Count how many words from earlier split lines with the same original index
+        for (let i = 0; i < line.lineIndex; i++) {
+          if (origMap[i] === origIdx) {
+            wordOffset += assignment.lines.find(l => l.lineIndex === i)?.words.length ?? 0
+          }
+        }
+      }
       const newWords = line.words.map((w, wi) => {
-        const replacement = crazyLine?.[wi]
+        const replacement = crazyLine[wordOffset + wi]
         return replacement ? { ...w, word: replacement } : w
       })
       return { ...line, words: newWords }

@@ -146,6 +146,8 @@ RULES:
 4. Make exactly ONE line near the middle sound completely normal and sincere — a "straight man" line. Every other line should be absurd. The sudden sanity in a sea of nonsense is the funniest part.
 5. Family-friendly, grammatically coherent enough to sing
 6. Do NOT reuse original words
+7. CRITICAL — EVERY word MUST be a real, standard dictionary word in the target language. No made-up words, no neologisms, no gibberish, no invented verbs. If in Hebrew, use only real Hebrew words (מילים אמיתיות בלבד). Double-check each word exists.
+8. CRITICAL — ZERO profanity, vulgarity, or near-profanity. Avoid any word that sounds like, rhymes with, or is one letter away from a curse word or sexual term in the target language. In Hebrew this specifically includes avoiding words that sound like or resemble: זיון, זונה, חרא, כוס, זין, תחת (in vulgar sense), and ANY conjugation or variation that could be misread as these. When in doubt, pick a completely different word.
 
 LINES (number, [word count, ~syllable count], original):
 ${lineSpecs}
