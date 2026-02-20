@@ -527,8 +527,8 @@ export function generateAssignments(
   seed: number = Date.now(),
   chunkInfos?: ChunkInfo[],
 ): PlayerAssignment {
-  // Split long lines so nothing exceeds ~10 words on screen
-  const { lines: wordTimestamps, originalIndices } = splitLongLines(rawWordTimestamps, 10)
+  // Split long lines so nothing exceeds ~7 words on screen (easier to read while singing)
+  const { lines: wordTimestamps, originalIndices } = splitLongLines(rawWordTimestamps, 7)
 
   const rand = createPRNG(seed)
 

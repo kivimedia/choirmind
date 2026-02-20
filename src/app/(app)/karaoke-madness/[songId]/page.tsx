@@ -353,6 +353,15 @@ export default function KaraokeMadnessPage() {
   // Build chunk infos for verse-by-verse mode and chorus detection
   const chunkInfos = useMemo(() => song ? buildChunkInfos(song.chunks) : [], [song])
 
+  // Sync coverage ratio for confidence warnings
+  const syncCoverage = useMemo(() => {
+    if (!song || song.chunks.length === 0) return 1
+    const chunksWithLyrics = song.chunks.filter(c => c.lyrics && c.lyrics.trim().length > 0)
+    if (chunksWithLyrics.length === 0) return 1
+    const synced = chunksWithLyrics.filter(c => c.wordTimestamps && c.wordTimestamps.some(l => l.length > 0))
+    return synced.length / chunksWithLyrics.length
+  }, [song])
+
   // Song duration for chaos overlay
   const songDurationMs = useMemo(() => {
     if (!assignment) return 0
@@ -911,6 +920,20 @@ export default function KaraokeMadnessPage() {
             </button>
           </div>
         </div>
+
+        {/* Sync coverage warning */}
+        {syncCoverage < 1 && (
+          <div className={[
+            'shrink-0 px-4 py-1.5 text-center text-xs font-medium',
+            syncCoverage < 0.5
+              ? 'bg-red-500/20 text-red-300'
+              : 'bg-amber-500/15 text-amber-300/80',
+          ].join(' ')}>
+            {syncCoverage < 0.5
+              ? '\u26A0\uFE0F \u05E8\u05D5\u05D1 \u05D4\u05E9\u05D9\u05E8 \u05DC\u05D0 \u05DE\u05E1\u05D5\u05E0\u05DB\u05E8\u05DF \u2014 \u05DB\u05D3\u05D0\u05D9 \u05DC\u05E1\u05E0\u05DB\u05E8\u05DF \u05DE\u05D7\u05D3\u05E9'
+              : `\u26A0\uFE0F \u05D7\u05DC\u05E7 \u05DE\u05D4\u05E9\u05D9\u05E8 \u05DC\u05D0 \u05DE\u05E1\u05D5\u05E0\u05DB\u05E8\u05DF (${Math.round(syncCoverage * 100)}%)`}
+          </div>
+        )}
 
         {/* Lyrics — center of screen, scrollable */}
         <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6">

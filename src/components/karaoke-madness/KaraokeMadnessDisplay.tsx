@@ -16,7 +16,7 @@ interface KaraokeMadnessDisplayProps {
   onLineClick?: (lineIdx: number) => void
 }
 
-const DEFAULT_LATENCY_OFFSET_MS = 500
+const DEFAULT_LATENCY_OFFSET_MS = 300
 
 function getColor(player: number) {
   if (player === EVERYONE) return EVERYONE_COLOR
@@ -88,10 +88,11 @@ export default function KaraokeMadnessDisplay({
       style={{ fontSize: 'clamp(24px, 7vw, 42px)', lineHeight: 1.8, paddingTop: '35vh', paddingBottom: '35vh' }}
     >
       {lines.map((line, lineIdx) => {
-        const isPast = lineIdx < activeLineIdx
         const isActiveLine = lineIdx === activeLineIdx
-        const isUpcomingLine = !isPast && !isActiveLine &&
-          lineIdx <= activeLineIdx + 2 && activeLineIdx >= 0
+        const isJustPast = activeLineIdx >= 0 && lineIdx === activeLineIdx - 1
+        const isNextLine = activeLineIdx >= 0 && lineIdx === activeLineIdx + 1
+        const isNearFuture = activeLineIdx >= 0 && lineIdx === activeLineIdx + 2
+        const isPast = lineIdx < activeLineIdx && !isJustPast
 
         const linePlayer = line.words.length > 0 ? line.words[0].player : -1
         const isEveryoneLine = linePlayer === EVERYONE
@@ -102,25 +103,45 @@ export default function KaraokeMadnessDisplay({
             ? playerNames[linePlayer]
             : ''
 
-        // Active line gets a colored underline glow
+        // Active line gets a colored underline glow; next line gets a subtle hint
+        const nextLineColor = isNextLine ? getColor(linePlayer) : null
         const lineGlowStyle = isActiveLine
           ? {
               background: `linear-gradient(to top, ${activeLineColor.hex}15, transparent 60%)`,
               borderBottom: `2px solid ${activeLineColor.hex}50`,
             }
-          : undefined
+          : isNextLine && nextLineColor
+            ? {
+                borderBottom: `1px solid ${nextLineColor.hex}25`,
+              }
+            : undefined
+
+        // 2-line spotlight: active + next prominent, everything else fades hard
+        let opacityClass = ''
+        if (activeLineIdx < 0) {
+          opacityClass = 'opacity-50'            // Before song starts
+        } else if (isActiveLine) {
+          opacityClass = ''                       // Full brightness
+        } else if (isNextLine) {
+          opacityClass = 'opacity-70'             // Clearly visible — prepare!
+        } else if (isJustPast) {
+          opacityClass = 'opacity-[0.15]'         // Faint ghost
+        } else if (isNearFuture) {
+          opacityClass = 'opacity-[0.15]'         // Barely visible hint
+        } else if (isPast) {
+          opacityClass = 'opacity-[0.07]'         // Nearly invisible
+        } else {
+          opacityClass = 'opacity-[0.07]'         // Far future — nearly invisible
+        }
 
         return (
           <div
             key={lineIdx}
             onClick={() => line.words.length > 0 && onLineClick?.(lineIdx)}
             className={[
-              'py-2 px-3 rounded-lg transition-all duration-500',
+              'py-2 px-3 rounded-lg transition-all duration-700',
               onLineClick && line.words.length > 0 ? 'cursor-pointer hover:bg-white/5' : '',
-              isPast ? 'opacity-20' : '',
-              isUpcomingLine ? 'opacity-60' : '',
-              !isPast && !isActiveLine && !isUpcomingLine && activeLineIdx >= 0 ? 'opacity-30' : '',
-              activeLineIdx < 0 ? 'opacity-50' : '',
+              opacityClass,
               isActiveLine ? 'scale-[1.03]' : '',
             ].join(' ')}
             style={lineGlowStyle}
@@ -129,11 +150,19 @@ export default function KaraokeMadnessDisplay({
               <span className="block h-4" />
             ) : (
               <>
-                {/* Player name tag above the line */}
+                {/* Player name tag above the line — active + next line */}
                 {(linePlayer >= 0 || isEveryoneLine) && isActiveLine && (
                   <div
                     className={`${lineColor.text} font-bold mb-1`}
                     style={{ fontSize: '0.4em', letterSpacing: '0.05em' }}
+                  >
+                    {linePlayerName}
+                  </div>
+                )}
+                {(linePlayer >= 0 || isEveryoneLine) && isNextLine && (
+                  <div
+                    className={`${lineColor.text} font-bold mb-1 animate-pulse`}
+                    style={{ fontSize: '0.35em', letterSpacing: '0.05em' }}
                   >
                     {linePlayerName}
                   </div>
@@ -143,6 +172,12 @@ export default function KaraokeMadnessDisplay({
                   const adjustedEnd = Math.max(0, word.endMs - latencyOffsetMs)
                   const isCurrentWord = isActiveLine && wordIdx === activeWordIdx
                   const isWordPast = currentTimeMs >= adjustedEnd
+
+                  // Pre-glow: next word on the active line, or first word of next line
+                  const isUpcomingWord = (
+                    (isActiveLine && wordIdx === activeWordIdx + 1) ||
+                    (isNextLine && wordIdx === 0 && activeWordIdx === (lines[activeLineIdx]?.words.length ?? 0) - 1)
+                  )
 
                   const color = getColor(word.player)
 
@@ -169,13 +204,19 @@ export default function KaraokeMadnessDisplay({
                         className={[
                           isCurrentWord
                             ? `${color.text} font-black transition-all duration-100`
-                            : isWordPast
-                              ? `${color.text} opacity-40`
-                              : `${color.text} opacity-30`,
+                            : isUpcomingWord
+                              ? `${color.text} opacity-60 transition-all duration-200`
+                              : isWordPast
+                                ? `${color.text} opacity-40`
+                                : `${color.text} opacity-30`,
                         ].join(' ')}
                         style={isCurrentWord ? {
                           textShadow: `0 0 30px ${color.hex}80, 0 0 60px ${color.hex}30`,
                           transform: 'scale(1.08)',
+                          display: 'inline-block',
+                        } : isUpcomingWord ? {
+                          textShadow: `0 0 12px ${color.hex}30`,
+                          transform: 'scale(1.03)',
                           display: 'inline-block',
                         } : undefined}
                       >
