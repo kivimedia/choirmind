@@ -140,12 +140,12 @@ function getScreenEffectStyle(effect: ScheduledDistraction | undefined): React.C
   if (!effect) return {}
   const id = effect.def.id
   switch (id) {
-    case 'screen-shake': return { animation: 'chaos-shake 0.1s infinite' }
+    case 'screen-shake': return { animation: 'chaos-shake 0.25s infinite' }
     case 'screen-tilt': return { transform: 'rotate(3deg)', transition: 'transform 0.5s' }
     case 'screen-flip': return { transform: 'scaleY(-1)', transition: 'transform 0.3s' }
     case 'screen-blur': return { filter: 'blur(2px)', transition: 'filter 0.5s' }
     case 'screen-dim': return { filter: 'brightness(0.4)', transition: 'filter 0.3s' }
-    case 'screen-static': return { animation: 'chaos-static 0.15s infinite' }
+    case 'screen-static': return { animation: 'chaos-static 0.4s infinite' }
     case 'matrix-rain': return {}
     case 'heartbeat-pulse': return { animation: 'chaos-heartbeat 0.8s infinite' }
     default: return {}
@@ -191,30 +191,30 @@ function renderDistraction(id: string, progress: number) {
     // Animals
     case 'bird-poop':
       return (
-        <div style={{ animation: 'chaos-drop 1s ease-in forwards' }}>
+        <div style={{ animation: 'chaos-drop 2.5s ease-in forwards' }}>
           <span>&#x1F426;</span>
           {progress > 0.4 && <span style={{ position: 'absolute', top: '100%', left: '50%', fontSize: '0.5em' }}>&#x1F4A9;</span>}
         </div>
       )
     case 'cat-walk':
-      return <span style={{ animation: 'chaos-walk-right 4s linear', display: 'inline-block' }}>&#x1F431;</span>
+      return <span style={{ animation: 'chaos-walk-right 8s linear', display: 'inline-block' }}>&#x1F431;</span>
     case 'dog-chase':
-      return <span style={{ animation: 'chaos-walk-right 3.5s linear', display: 'inline-block' }}>&#x1F415;</span>
+      return <span style={{ animation: 'chaos-walk-right 7s linear', display: 'inline-block' }}>&#x1F415;</span>
     case 'spider-drop':
-      return <span style={{ animation: 'chaos-drop 2s ease-in', display: 'inline-block' }}>&#x1F577;&#xFE0F;</span>
+      return <span style={{ animation: 'chaos-drop 4s ease-in', display: 'inline-block' }}>&#x1F577;&#xFE0F;</span>
     case 'fish-swim':
-      return <span style={{ animation: 'chaos-swim 3.5s ease-in-out', display: 'inline-block' }}>&#x1F41F;</span>
+      return <span style={{ animation: 'chaos-swim 7s ease-in-out', display: 'inline-block' }}>&#x1F41F;</span>
     case 'butterfly-swarm':
       return (
         <div style={{ display: 'flex', gap: '10px' }}>
           {[0, 1, 2].map((i) => (
-            <span key={i} style={{ animation: `chaos-flutter ${2 + i * 0.3}s ease-in-out infinite`, display: 'inline-block' }}>&#x1F98B;</span>
+            <span key={i} style={{ animation: `chaos-flutter ${3.5 + i * 0.5}s ease-in-out infinite`, display: 'inline-block' }}>&#x1F98B;</span>
           ))}
         </div>
       )
     case 'duck-parade':
       return (
-        <div style={{ display: 'flex', animation: 'chaos-walk-right 4.5s linear' }}>
+        <div style={{ display: 'flex', animation: 'chaos-walk-right 9s linear' }}>
           <span>&#x1F986;</span>
           <span>&#x1F986;</span>
           <span>&#x1F986;</span>
@@ -222,39 +222,39 @@ function renderDistraction(id: string, progress: number) {
         </div>
       )
     case 'frog-jump':
-      return <span style={{ animation: 'chaos-jump 1s ease-in-out infinite', display: 'inline-block' }}>&#x1F438;</span>
+      return <span style={{ animation: 'chaos-jump 1.5s ease-in-out infinite', display: 'inline-block' }}>&#x1F438;</span>
 
     // People
     case 'peek-character':
-      return <span style={{ animation: 'chaos-peek 3s ease-in-out', display: 'inline-block' }}>&#x1F440;</span>
+      return <span style={{ animation: 'chaos-peek 5s ease-in-out', display: 'inline-block' }}>&#x1F440;</span>
     case 'wrong-sign':
       return (
         <div style={{
           background: 'rgba(239, 68, 68, 0.9)', color: 'white', padding: '12px 24px',
           borderRadius: '12px', fontWeight: 900, fontSize: '0.5em', fontFamily: 'sans-serif',
-          animation: 'chaos-shake 0.3s infinite', boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+          animation: 'chaos-shake 0.5s infinite', boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
         }}>
           &#x274C; WRONG!
         </div>
       )
     case 'grandma-walk':
-      return <span style={{ animation: 'chaos-walk-right 4s linear', display: 'inline-block' }}>&#x1F475;</span>
+      return <span style={{ animation: 'chaos-walk-right 9s linear', display: 'inline-block' }}>&#x1F475;</span>
     case 'dancing-man':
-      return <span style={{ animation: 'chaos-dance 0.5s ease-in-out infinite', display: 'inline-block' }}>&#x1F57A;</span>
+      return <span style={{ animation: 'chaos-dance 1s ease-in-out infinite', display: 'inline-block' }}>&#x1F57A;</span>
     case 'pointing-finger':
-      return <span style={{ animation: 'chaos-wobble 1s ease-in-out infinite', display: 'inline-block' }}>&#x1F449;</span>
+      return <span style={{ animation: 'chaos-wobble 1.8s ease-in-out infinite', display: 'inline-block' }}>&#x1F449;</span>
     case 'sleeping-person':
       return (
         <div style={{ position: 'relative' }}>
           <span>&#x1F634;</span>
-          <span style={{ fontSize: '0.4em', position: 'absolute', top: '-10px', right: '-5px', animation: 'chaos-float-up 1.5s infinite' }}>&#x1F4A4;</span>
+          <span style={{ fontSize: '0.4em', position: 'absolute', top: '-10px', right: '-5px', animation: 'chaos-float-up 3s infinite' }}>&#x1F4A4;</span>
         </div>
       )
     case 'chef-pizza':
       return (
         <div style={{ display: 'flex', gap: '5px' }}>
           <span>&#x1F468;&#x200D;&#x1F373;</span>
-          <span style={{ animation: 'chaos-throw 1s ease-out infinite', display: 'inline-block' }}>&#x1F355;</span>
+          <span style={{ animation: 'chaos-throw 1.8s ease-out infinite', display: 'inline-block' }}>&#x1F355;</span>
         </div>
       )
     case 'photographer':
@@ -272,14 +272,14 @@ function renderDistraction(id: string, progress: number) {
 
     // Objects
     case 'pizza-bounce':
-      return <span style={{ animation: 'chaos-bounce 0.8s ease-in-out infinite', display: 'inline-block' }}>&#x1F355;</span>
+      return <span style={{ animation: 'chaos-bounce 1.4s ease-in-out infinite', display: 'inline-block' }}>&#x1F355;</span>
     case 'disco-ball':
-      return <span style={{ animation: 'chaos-spin 2s linear infinite', display: 'inline-block' }}>&#x1FA69;</span>
+      return <span style={{ animation: 'chaos-spin 3.5s linear infinite', display: 'inline-block' }}>&#x1FA69;</span>
     case 'rain-drops':
       return (
         <div style={{ display: 'flex', gap: '20px', fontSize: '0.6em' }}>
           {[0, 1, 2, 3, 4].map((i) => (
-            <span key={i} style={{ animation: `chaos-drop ${1 + i * 0.2}s linear infinite`, animationDelay: `${i * 0.15}s`, display: 'inline-block' }}>&#x1F4A7;</span>
+            <span key={i} style={{ animation: `chaos-drop ${2.5 + i * 0.4}s linear infinite`, animationDelay: `${i * 0.3}s`, display: 'inline-block' }}>&#x1F4A7;</span>
           ))}
         </div>
       )
@@ -287,18 +287,18 @@ function renderDistraction(id: string, progress: number) {
       return (
         <div style={{ display: 'flex', gap: '8px', fontSize: '0.7em' }}>
           {['\u{1F38A}', '\u{1F389}', '\u2728', '\u{1F38A}', '\u{1F389}'].map((c, i) => (
-            <span key={i} style={{ animation: 'chaos-explode 1s ease-out forwards', animationDelay: `${i * 0.05}s`, display: 'inline-block' }}>{c}</span>
+            <span key={i} style={{ animation: 'chaos-explode 1.8s ease-out forwards', animationDelay: `${i * 0.1}s`, display: 'inline-block' }}>{c}</span>
           ))}
         </div>
       )
     case 'balloon-float':
-      return <span style={{ animation: 'chaos-float-up 4s ease-out', display: 'inline-block' }}>&#x1F388;</span>
+      return <span style={{ animation: 'chaos-float-up 7s ease-out', display: 'inline-block' }}>&#x1F388;</span>
     case 'rocket-launch':
-      return <span style={{ animation: 'chaos-rocket 3s ease-in', display: 'inline-block' }}>&#x1F680;</span>
+      return <span style={{ animation: 'chaos-rocket 5s ease-in', display: 'inline-block' }}>&#x1F680;</span>
     case 'rolling-ball':
-      return <span style={{ animation: 'chaos-roll 3.5s linear', display: 'inline-block' }}>&#x26BD;</span>
+      return <span style={{ animation: 'chaos-roll 7s linear', display: 'inline-block' }}>&#x26BD;</span>
     case 'spinning-star':
-      return <span style={{ animation: 'chaos-spin 1s linear infinite', display: 'inline-block' }}>&#x2B50;</span>
+      return <span style={{ animation: 'chaos-spin 2s linear infinite', display: 'inline-block' }}>&#x2B50;</span>
 
     // Screen effects that render content
     case 'matrix-rain':
@@ -310,8 +310,8 @@ function renderDistraction(id: string, progress: number) {
           {Array.from({ length: 20 }, (_, i) => (
             <div key={i} style={{
               position: 'absolute', left: `${i * 5}%`,
-              animation: `chaos-matrix-col ${2 + (i % 3) * 0.5}s linear infinite`,
-              animationDelay: `${(i % 5) * 0.4}s`,
+              animation: `chaos-matrix-col ${4 + (i % 3) * 1}s linear infinite`,
+              animationDelay: `${(i % 5) * 0.6}s`,
             }}>
               {'01'.repeat(30)}
             </div>
@@ -347,7 +347,7 @@ function renderDistraction(id: string, progress: number) {
           borderRadius: '12px', fontSize: '0.4em', fontFamily: 'sans-serif',
           textAlign: 'center' as const,
         }}>
-          <div style={{ animation: 'chaos-spin 1s linear infinite', display: 'inline-block', marginBottom: '4px' }}>&#x23F3;</div>
+          <div style={{ animation: 'chaos-spin 1.8s linear infinite', display: 'inline-block', marginBottom: '4px' }}>&#x23F3;</div>
           <div>{'\u05D8\u05D5\u05E2\u05DF...'}</div>
         </div>
       )
@@ -412,25 +412,25 @@ function renderDistraction(id: string, progress: number) {
     // Wacky illustrations inspired by crazy lyrics scenarios
     case 'penguin-pizza':
       return (
-        <div style={{ display: 'flex', gap: '4px', animation: 'chaos-wobble 0.6s ease-in-out infinite' }}>
+        <div style={{ display: 'flex', gap: '4px', animation: 'chaos-wobble 1.2s ease-in-out infinite' }}>
           <span>&#x1F427;</span>
           <span style={{ fontSize: '0.5em', alignSelf: 'center' }}>&#x27A1;&#xFE0F;</span>
-          <span style={{ animation: 'chaos-spin 2s linear infinite', display: 'inline-block' }}>&#x1F355;</span>
+          <span style={{ animation: 'chaos-spin 3.5s linear infinite', display: 'inline-block' }}>&#x1F355;</span>
         </div>
       )
     case 'fish-couch-fight':
       return (
-        <div style={{ display: 'flex', gap: '2px', animation: 'chaos-shake 0.2s infinite' }}>
+        <div style={{ display: 'flex', gap: '2px', animation: 'chaos-shake 0.5s infinite' }}>
           <span>&#x1F41F;</span>
-          <span style={{ fontSize: '0.5em', animation: 'chaos-bounce 0.4s infinite', display: 'inline-block' }}>&#x1F4A2;</span>
+          <span style={{ fontSize: '0.5em', animation: 'chaos-bounce 1s infinite', display: 'inline-block' }}>&#x1F4A2;</span>
           <span>&#x1F6CB;&#xFE0F;</span>
-          <span style={{ fontSize: '0.5em', animation: 'chaos-bounce 0.4s infinite 0.2s', display: 'inline-block' }}>&#x1F4A2;</span>
+          <span style={{ fontSize: '0.5em', animation: 'chaos-bounce 1s infinite 0.3s', display: 'inline-block' }}>&#x1F4A2;</span>
           <span style={{ transform: 'scaleX(-1)', display: 'inline-block' }}>&#x1F41F;</span>
         </div>
       )
     case 'cat-mayor':
       return (
-        <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'center', animation: 'chaos-dance 1s infinite' }}>
+        <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'center', animation: 'chaos-dance 2s infinite' }}>
           <span style={{ fontSize: '0.4em' }}>&#x1F451;</span>
           <span>&#x1F431;</span>
           <span style={{ fontSize: '0.25em', background: 'rgba(0,0,0,0.7)', color: 'white', padding: '2px 8px', borderRadius: '6px', whiteSpace: 'nowrap' as const }}>VOTE MEOW</span>
@@ -438,20 +438,20 @@ function renderDistraction(id: string, progress: number) {
       )
     case 'ceo-dog':
       return (
-        <div style={{ display: 'flex', gap: '4px', alignItems: 'center', animation: 'chaos-walk-right 3.5s linear' }}>
+        <div style={{ display: 'flex', gap: '4px', alignItems: 'center', animation: 'chaos-walk-right 8s linear' }}>
           <span>&#x1F436;</span>
           <span style={{ fontSize: '0.3em', background: 'rgba(0,0,0,0.8)', color: '#fbbf24', padding: '4px 8px', borderRadius: '6px', fontWeight: 700, fontFamily: 'sans-serif', whiteSpace: 'nowrap' as const }}>&#x1F4BC; CEO</span>
         </div>
       )
     case 'octopus-dress':
       return (
-        <div style={{ position: 'relative', animation: 'chaos-wobble 0.8s infinite' }}>
+        <div style={{ position: 'relative', animation: 'chaos-wobble 1.6s infinite' }}>
           <span>&#x1F419;</span>
           {[0, 1, 2].map(i => (
             <span key={i} style={{
               position: 'absolute', fontSize: '0.3em',
               top: `${60 + i * 15}%`, left: `${20 + i * 25}%`,
-              animation: `chaos-flutter ${1 + i * 0.3}s infinite`,
+              animation: `chaos-flutter ${2.5 + i * 0.5}s infinite`,
               display: 'inline-block',
             }}>&#x1F455;</span>
           ))}
@@ -459,7 +459,7 @@ function renderDistraction(id: string, progress: number) {
       )
     case 'snail-chase':
       return (
-        <div style={{ display: 'flex', gap: '30px', animation: 'chaos-walk-right 8s linear' }}>
+        <div style={{ display: 'flex', gap: '30px', animation: 'chaos-walk-right 14s linear' }}>
           <span>&#x1F40C;</span>
           <span style={{ fontSize: '0.4em', alignSelf: 'center' }}>&#x1F4A8;</span>
           <span style={{ transform: 'scaleX(-1)', display: 'inline-block' }}>&#x1F40C;</span>
@@ -468,17 +468,17 @@ function renderDistraction(id: string, progress: number) {
     case 'banana-crisis':
       return (
         <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'center' }}>
-          <span style={{ animation: 'chaos-heartbeat 0.6s infinite', display: 'inline-block' }}>&#x1F34C;</span>
-          <span style={{ fontSize: '0.2em', background: 'rgba(0,0,0,0.7)', color: 'white', padding: '2px 6px', borderRadius: '4px', animation: 'chaos-shake 0.3s infinite', whiteSpace: 'nowrap' as const }}>&#x1F62D; MIDLIFE CRISIS</span>
+          <span style={{ animation: 'chaos-heartbeat 1.2s infinite', display: 'inline-block' }}>&#x1F34C;</span>
+          <span style={{ fontSize: '0.2em', background: 'rgba(0,0,0,0.7)', color: 'white', padding: '2px 6px', borderRadius: '4px', animation: 'chaos-shake 0.6s infinite', whiteSpace: 'nowrap' as const }}>&#x1F62D; MIDLIFE CRISIS</span>
         </div>
       )
     case 'fridge-revolution':
       return (
-        <div style={{ display: 'flex', gap: '3px', animation: 'chaos-shake 0.15s infinite' }}>
-          <span style={{ animation: 'chaos-jump 0.5s infinite', display: 'inline-block' }}>&#x1F966;</span>
-          <span style={{ animation: 'chaos-jump 0.5s infinite 0.1s', display: 'inline-block' }}>&#x1F955;</span>
+        <div style={{ display: 'flex', gap: '3px', animation: 'chaos-shake 0.4s infinite' }}>
+          <span style={{ animation: 'chaos-jump 1.2s infinite', display: 'inline-block' }}>&#x1F966;</span>
+          <span style={{ animation: 'chaos-jump 1.2s infinite 0.2s', display: 'inline-block' }}>&#x1F955;</span>
           <span style={{ fontSize: '0.4em', alignSelf: 'center' }}>&#x2694;&#xFE0F;</span>
-          <span style={{ animation: 'chaos-wobble 0.5s infinite', display: 'inline-block' }}>&#x1F370;</span>
+          <span style={{ animation: 'chaos-wobble 1s infinite', display: 'inline-block' }}>&#x1F370;</span>
         </div>
       )
     case 'pizza-trial':
@@ -486,20 +486,20 @@ function renderDistraction(id: string, progress: number) {
         <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-end' }}>
           <span style={{ fontSize: '0.6em' }}>&#x1F957;</span>
           <span style={{ fontSize: '0.3em', background: 'rgba(0,0,0,0.8)', color: '#ef4444', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, fontFamily: 'sans-serif' }}>GUILTY!</span>
-          <span style={{ animation: 'chaos-shake 0.2s infinite', display: 'inline-block' }}>&#x1F355;</span>
+          <span style={{ animation: 'chaos-shake 0.5s infinite', display: 'inline-block' }}>&#x1F355;</span>
         </div>
       )
     case 'toast-propose':
       return (
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-          <span style={{ animation: 'chaos-wobble 1s infinite', display: 'inline-block' }}>&#x1F35E;</span>
-          <span style={{ fontSize: '0.4em', animation: 'chaos-bounce 0.6s infinite', display: 'inline-block' }}>&#x1F48D;</span>
+          <span style={{ animation: 'chaos-wobble 1.8s infinite', display: 'inline-block' }}>&#x1F35E;</span>
+          <span style={{ fontSize: '0.4em', animation: 'chaos-bounce 1.2s infinite', display: 'inline-block' }}>&#x1F48D;</span>
           <span>&#x1F95C;</span>
         </div>
       )
     case 'alien-breakfast':
       return (
-        <div style={{ display: 'flex', gap: '4px', alignItems: 'center', animation: 'chaos-peek 3s ease-in-out' }}>
+        <div style={{ display: 'flex', gap: '4px', alignItems: 'center', animation: 'chaos-peek 5s ease-in-out' }}>
           <span>&#x1F47D;</span>
           <span style={{ fontSize: '0.3em' }}>&#x2753;</span>
           <span style={{ fontSize: '0.7em' }}>&#x1F373;</span>
@@ -508,15 +508,15 @@ function renderDistraction(id: string, progress: number) {
     case 'sock-reunion':
       return (
         <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
-          <span style={{ animation: 'chaos-walk-right 1.5s ease-out', display: 'inline-block' }}>&#x1F9E6;</span>
-          <span style={{ fontSize: '0.5em', animation: 'chaos-heartbeat 0.5s infinite', display: 'inline-block' }}>&#x2764;&#xFE0F;</span>
-          <span style={{ animation: 'chaos-walk-right 1.5s ease-out reverse', display: 'inline-block', transform: 'scaleX(-1)' }}>&#x1F9E6;</span>
+          <span style={{ animation: 'chaos-walk-right 3s ease-out', display: 'inline-block' }}>&#x1F9E6;</span>
+          <span style={{ fontSize: '0.5em', animation: 'chaos-heartbeat 1s infinite', display: 'inline-block' }}>&#x2764;&#xFE0F;</span>
+          <span style={{ animation: 'chaos-walk-right 3s ease-out reverse', display: 'inline-block', transform: 'scaleX(-1)' }}>&#x1F9E6;</span>
         </div>
       )
     case 'chair-diary':
       return (
         <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'center' }}>
-          <span style={{ animation: 'chaos-wobble 2s infinite', display: 'inline-block' }}>&#x1FA91;</span>
+          <span style={{ animation: 'chaos-wobble 3s infinite', display: 'inline-block' }}>&#x1FA91;</span>
           <span style={{ fontSize: '0.25em', background: 'rgba(0,0,0,0.7)', color: '#93c5fd', padding: '2px 8px', borderRadius: '4px', fontStyle: 'italic', fontFamily: 'serif', whiteSpace: 'nowrap' as const }}>{'\u05D9\u05D5\u05DE\u05DF \u05D9\u05E7\u05E8...'}</span>
         </div>
       )
@@ -527,8 +527,8 @@ function renderDistraction(id: string, progress: number) {
             <div key={i} style={{
               width: '20px', height: '20px', borderRadius: '50%',
               background: color, opacity: progress * 3 % 3 > i ? 1 : 0.2,
-              animation: 'chaos-static 0.3s infinite',
-              transition: 'opacity 0.1s',
+              animation: 'chaos-static 0.6s infinite',
+              transition: 'opacity 0.2s',
             }} />
           ))}
           <span style={{ fontSize: '0.2em', marginTop: '2px' }}>&#x1F635;&#x200D;&#x1F4AB;</span>
@@ -539,36 +539,36 @@ function renderDistraction(id: string, progress: number) {
         <div style={{ display: 'flex', gap: '30px' }}>
           <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'center' }}>
             <span style={{ fontSize: '0.3em', fontFamily: 'monospace', color: '#22c55e' }}>{Math.floor(progress * 10)}</span>
-            <span style={{ animation: `chaos-float-up ${2}s linear`, display: 'inline-block', fontSize: '0.7em' }}>&#x1F6D7;</span>
+            <span style={{ animation: `chaos-float-up ${4}s linear`, display: 'inline-block', fontSize: '0.7em' }}>&#x1F6D7;</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'center' }}>
             <span style={{ fontSize: '0.3em', fontFamily: 'monospace', color: '#ef4444' }}>{Math.floor(progress * 8)}</span>
-            <span style={{ animation: `chaos-float-up ${2.5}s linear`, display: 'inline-block', fontSize: '0.7em' }}>&#x1F6D7;</span>
+            <span style={{ animation: `chaos-float-up ${5}s linear`, display: 'inline-block', fontSize: '0.7em' }}>&#x1F6D7;</span>
           </div>
         </div>
       )
     case 'grandma-cook-battle':
       return (
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', animation: 'chaos-shake 0.2s infinite' }}>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', animation: 'chaos-shake 0.5s infinite' }}>
           <span>&#x1F475;</span>
           <span style={{ fontSize: '0.5em' }}>&#x2694;&#xFE0F;</span>
           <span style={{ transform: 'scaleX(-1)', display: 'inline-block' }}>&#x1F475;</span>
-          <span style={{ fontSize: '0.5em', animation: 'chaos-throw 0.8s infinite', display: 'inline-block' }}>&#x1F35A;</span>
+          <span style={{ fontSize: '0.5em', animation: 'chaos-throw 1.8s infinite', display: 'inline-block' }}>&#x1F35A;</span>
         </div>
       )
     case 'falafel-love':
       return (
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-          <span style={{ animation: 'chaos-wobble 1s infinite', display: 'inline-block' }}>&#x1F9C6;</span>
-          <span style={{ fontSize: '0.5em', animation: 'chaos-heartbeat 0.6s infinite', display: 'inline-block' }}>&#x1F495;</span>
-          <span style={{ animation: 'chaos-wobble 1s infinite 0.5s', display: 'inline-block' }}>&#x1F9C6;</span>
-          <span style={{ fontSize: '0.4em', position: 'relative', top: '-15px', animation: 'chaos-shake 0.3s infinite', display: 'inline-block' }}>&#x1F60D;</span>
+          <span style={{ animation: 'chaos-wobble 1.8s infinite', display: 'inline-block' }}>&#x1F9C6;</span>
+          <span style={{ fontSize: '0.5em', animation: 'chaos-heartbeat 1.2s infinite', display: 'inline-block' }}>&#x1F495;</span>
+          <span style={{ animation: 'chaos-wobble 1.8s infinite 0.5s', display: 'inline-block' }}>&#x1F9C6;</span>
+          <span style={{ fontSize: '0.4em', position: 'relative', top: '-15px', animation: 'chaos-shake 0.6s infinite', display: 'inline-block' }}>&#x1F60D;</span>
         </div>
       )
     case 'pigeon-complaint':
       return (
         <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-start' }}>
-          <span style={{ animation: 'chaos-wobble 0.5s infinite', display: 'inline-block' }}>&#x1F54A;&#xFE0F;</span>
+          <span style={{ animation: 'chaos-wobble 1.2s infinite', display: 'inline-block' }}>&#x1F54A;&#xFE0F;</span>
           <div style={{ fontSize: '0.2em', background: 'white', color: '#1f2937', padding: '4px 8px', borderRadius: '8px', maxWidth: '120px', fontFamily: 'sans-serif', fontWeight: 600, boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}>
             {'\u05D4\u05DC\u05D7\u05DD \u05DB\u05D0\u05DF \u05E0\u05D5\u05E8\u05D0!!'}
           </div>
@@ -576,7 +576,7 @@ function renderDistraction(id: string, progress: number) {
       )
     case 'astronaut-milk':
       return (
-        <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'center', animation: 'chaos-float-up 5s ease-out' }}>
+        <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'center', animation: 'chaos-float-up 8s ease-out' }}>
           <span>&#x1F468;&#x200D;&#x1F680;</span>
           <span style={{ fontSize: '0.25em', background: 'rgba(0,0,0,0.7)', color: 'white', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' as const }}>&#x1F95B; {'\u05E9\u05DB\u05D7\u05EA\u05D9 \u05D7\u05DC\u05D1!'}</span>
         </div>
@@ -587,7 +587,7 @@ function renderDistraction(id: string, progress: number) {
           background: 'rgba(0,0,0,0.85)', color: '#f97316', padding: '10px 20px',
           borderRadius: '12px', fontSize: '0.35em', fontFamily: 'sans-serif',
           fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px',
-          animation: 'chaos-shake 0.3s infinite',
+          animation: 'chaos-shake 0.6s infinite',
         }}>
           &#x1F4CD; {'\u05DE\u05D7\u05E9\u05D1 \u05DE\u05E1\u05DC\u05D5\u05DC \u05DE\u05D7\u05D3\u05E9...'}
         </div>
